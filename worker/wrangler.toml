@@ -1,0 +1,16 @@
+name = "kiot-thien-thanh-api"
+main = "index.ts"
+compatibility_date = "2026-01-01"
+
+[vars]
+ENVIRONMENT = "production"
+
+# Cloudflare R2 Bucket binding
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "thienthanh-assets"
+public_url = "https://assets.kiotthienthanh.vn"
+
+# Secrets required in production dashboard / wrangler secret put:
+# - GOOGLE_APPS_SCRIPT_URL
+# - ADMIN_API_SECRET
