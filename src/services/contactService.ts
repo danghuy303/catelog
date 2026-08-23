@@ -1,13 +1,21 @@
 import { ContactSubmission, ContactFormInput, ContactStatus } from '../types/contact';
 import { MOCK_CONTACTS } from '../mock/contactsData';
 import { api } from './api';
+import { loadFromStorage, saveToStorage } from '../utils/storage';
 
-let localContacts: ContactSubmission[] = [...MOCK_CONTACTS];
+const STORAGE_KEY = 'thienthanh_contacts_db';
+
+function getLocalContacts(): ContactSubmission[] {
+  return loadFromStorage<ContactSubmission[]>(STORAGE_KEY, MOCK_CONTACTS);
+}
+
+function saveLocalContacts(contacts: ContactSubmission[]): void {
+  saveToStorage(STORAGE_KEY, contacts);
+}
 
 export const contactService = {
   async submitContact(data: ContactFormInput): Promise<{ success: boolean; message: string }> {
     try {
-      // Attempt API call if VITE_API_URL is configured
       if (import.meta.env.VITE_API_URL) {
         const response = await api.post('/contact', data);
         return response.data;
@@ -16,7 +24,7 @@ export const contactService = {
       console.warn('API Worker unavailable, using fallback mock submission handler');
     }
 
-    // Fallback simulation
+    const currentList = getLocalContacts();
     const newSubmission: ContactSubmission = {
       id: `ct-${Date.now()}`,
       name: data.name,
@@ -29,10 +37,10 @@ export const contactService = {
       createdAt: new Date().toISOString()
     };
 
-    localContacts.unshift(newSubmission);
+    currentList.unshift(newSubmission);
+    saveLocalContacts(currentList);
     
-    // Simulate network delay
-    await new Promise(res => setTimeout(res, 600));
+    await new Promise(res => setTimeout(res, 400));
 
     return {
       success: true,
@@ -41,18 +49,22 @@ export const contactService = {
   },
 
   async getContacts(): Promise<ContactSubmission[]> {
-    return localContacts;
+    return getLocalContacts();
   },
 
   async updateContactStatus(id: string, status: ContactStatus): Promise<ContactSubmission> {
-    const index = localContacts.findIndex(c => c.id === id);
+    const list = getLocalContacts();
+    const index = list.findIndex(c => c.id === id);
     if (index === -1) throw new Error('Không tìm thấy liên hệ');
-    localContacts[index].status = status;
-    return localContacts[index];
+    list[index].status = status;
+    saveLocalContacts(list);
+    return list[index];
   },
 
   async deleteContact(id: string): Promise<boolean> {
-    localContacts = localContacts.filter(c => c.id !== id);
+    let list = getLocalContacts();
+    list = list.filter(c => c.id !== id);
+    saveLocalContacts(list);
     return true;
   }
 };

@@ -1,12 +1,20 @@
 import { Product, ProductFilterParams } from '../types/product';
 import { MOCK_PRODUCTS } from '../mock/productsData';
+import { loadFromStorage, saveToStorage } from '../utils/storage';
 
-// Local reactive store for CMS operations
-let localProducts: Product[] = [...MOCK_PRODUCTS];
+const STORAGE_KEY = 'thienthanh_products_db';
+
+function getLocalProducts(): Product[] {
+  return loadFromStorage<Product[]>(STORAGE_KEY, MOCK_PRODUCTS);
+}
+
+function saveLocalProducts(products: Product[]): void {
+  saveToStorage(STORAGE_KEY, products);
+}
 
 export const productService = {
   async getProducts(params?: ProductFilterParams): Promise<{ data: Product[]; total: number }> {
-    let filtered = [...localProducts];
+    let filtered = getLocalProducts();
 
     if (params?.categorySlug) {
       filtered = filtered.filter(p => p.categorySlug === params.categorySlug);
@@ -33,22 +41,26 @@ export const productService = {
   },
 
   async getProductBySlug(categorySlug: string, productSlug: string): Promise<Product | null> {
-    const found = localProducts.find(p => p.slug === productSlug || p.id === productSlug);
+    const list = getLocalProducts();
+    const found = list.find(p => p.slug === productSlug || p.id === productSlug);
     return found || null;
   },
 
   async getProductById(id: string): Promise<Product | null> {
-    const found = localProducts.find(p => p.id === id);
+    const list = getLocalProducts();
+    const found = list.find(p => p.id === id);
     return found || null;
   },
 
   async getRelatedProducts(categoryId: string, currentProductId: string, limit = 4): Promise<Product[]> {
-    return localProducts
+    const list = getLocalProducts();
+    return list
       .filter(p => p.categoryId === categoryId && p.id !== currentProductId && p.status === 'published')
       .slice(0, limit);
   },
 
   async createProduct(productData: Partial<Product>): Promise<Product> {
+    const list = getLocalProducts();
     const newProduct: Product = {
       id: `prod-${Date.now()}`,
       categoryId: productData.categoryId || 'cat-1',
@@ -72,26 +84,31 @@ export const productService = {
       updatedAt: new Date().toISOString()
     };
 
-    localProducts.unshift(newProduct);
+    list.unshift(newProduct);
+    saveLocalProducts(list);
     return newProduct;
   },
 
   async updateProduct(id: string, productData: Partial<Product>): Promise<Product> {
-    const index = localProducts.findIndex(p => p.id === id);
+    const list = getLocalProducts();
+    const index = list.findIndex(p => p.id === id);
     if (index === -1) throw new Error('Không tìm thấy sản phẩm');
 
     const updated: Product = {
-      ...localProducts[index],
+      ...list[index],
       ...productData,
       updatedAt: new Date().toISOString()
     };
 
-    localProducts[index] = updated;
+    list[index] = updated;
+    saveLocalProducts(list);
     return updated;
   },
 
   async deleteProduct(id: string): Promise<boolean> {
-    localProducts = localProducts.filter(p => p.id !== id);
+    let list = getLocalProducts();
+    list = list.filter(p => p.id !== id);
+    saveLocalProducts(list);
     return true;
   }
 };

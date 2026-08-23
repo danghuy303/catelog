@@ -1,11 +1,20 @@
 import { NewsArticle, NewsFilterParams } from '../types/news';
 import { MOCK_NEWS } from '../mock/newsData';
+import { loadFromStorage, saveToStorage } from '../utils/storage';
 
-let localNews: NewsArticle[] = [...MOCK_NEWS];
+const STORAGE_KEY = 'thienthanh_news_db';
+
+function getLocalNews(): NewsArticle[] {
+  return loadFromStorage<NewsArticle[]>(STORAGE_KEY, MOCK_NEWS);
+}
+
+function saveLocalNews(news: NewsArticle[]): void {
+  saveToStorage(STORAGE_KEY, news);
+}
 
 export const newsService = {
   async getNews(params?: NewsFilterParams): Promise<{ data: NewsArticle[]; total: number }> {
-    let filtered = [...localNews];
+    let filtered = getLocalNews();
 
     if (params?.categorySlug) {
       filtered = filtered.filter(n => n.categorySlug === params.categorySlug);
@@ -28,14 +37,17 @@ export const newsService = {
   },
 
   async getNewsBySlug(categorySlug: string, slug: string): Promise<NewsArticle | null> {
-    return localNews.find(n => n.slug === slug || n.id === slug) || null;
+    const list = getLocalNews();
+    return list.find(n => n.slug === slug || n.id === slug) || null;
   },
 
   async getNewsById(id: string): Promise<NewsArticle | null> {
-    return localNews.find(n => n.id === id) || null;
+    const list = getLocalNews();
+    return list.find(n => n.id === id) || null;
   },
 
   async createNews(data: Partial<NewsArticle>): Promise<NewsArticle> {
+    const currentList = getLocalNews();
     const newArticle: NewsArticle = {
       id: `news-${Date.now()}`,
       categoryId: data.categoryId || 'ncat-1',
@@ -54,25 +66,30 @@ export const newsService = {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
-    localNews.unshift(newArticle);
+    currentList.unshift(newArticle);
+    saveLocalNews(currentList);
     return newArticle;
   },
 
   async updateNews(id: string, data: Partial<NewsArticle>): Promise<NewsArticle> {
-    const index = localNews.findIndex(n => n.id === id);
+    const currentList = getLocalNews();
+    const index = currentList.findIndex(n => n.id === id);
     if (index === -1) throw new Error('Không tìm thấy bài viết');
 
     const updated: NewsArticle = {
-      ...localNews[index],
+      ...currentList[index],
       ...data,
       updatedAt: new Date().toISOString()
     };
-    localNews[index] = updated;
+    currentList[index] = updated;
+    saveLocalNews(currentList);
     return updated;
   },
 
   async deleteNews(id: string): Promise<boolean> {
-    localNews = localNews.filter(n => n.id !== id);
+    let currentList = getLocalNews();
+    currentList = currentList.filter(n => n.id !== id);
+    saveLocalNews(currentList);
     return true;
   }
 };

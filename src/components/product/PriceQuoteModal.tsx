@@ -62,7 +62,7 @@ export const PriceQuoteModal: React.FC<PriceQuoteModalProps> = ({
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={handleReset} title="Đăng ký nhận báo giá B2B">
+    <Modal isOpen={isOpen} onClose={handleReset} title="Liên hệ nhận báo giá B2B">
       {success ? (
         <div className="text-center py-6">
           <div className="w-16 h-16 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-4">

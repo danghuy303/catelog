@@ -1,18 +1,29 @@
 import { CatalogueItem } from '../types/catalogue';
 import { MOCK_CATALOGUES } from '../mock/cataloguesData';
+import { loadFromStorage, saveToStorage } from '../utils/storage';
 
-let localCatalogues: CatalogueItem[] = [...MOCK_CATALOGUES];
+const STORAGE_KEY = 'thienthanh_catalogues_db';
+
+function getLocalCatalogues(): CatalogueItem[] {
+  return loadFromStorage<CatalogueItem[]>(STORAGE_KEY, MOCK_CATALOGUES);
+}
+
+function saveLocalCatalogues(items: CatalogueItem[]): void {
+  saveToStorage(STORAGE_KEY, items);
+}
 
 export const catalogueService = {
   async getCatalogues(): Promise<CatalogueItem[]> {
-    return localCatalogues.filter(c => c.status === 'active');
+    const list = getLocalCatalogues();
+    return list.filter(c => c.status === 'active');
   },
 
   async getAllCataloguesForAdmin(): Promise<CatalogueItem[]> {
-    return localCatalogues;
+    return getLocalCatalogues();
   },
 
   async createCatalogue(data: Partial<CatalogueItem>): Promise<CatalogueItem> {
+    const list = getLocalCatalogues();
     const newItem: CatalogueItem = {
       id: `catl-${Date.now()}`,
       title: data.title || 'Catalogue Mới',
@@ -24,12 +35,15 @@ export const catalogueService = {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
-    localCatalogues.unshift(newItem);
+    list.unshift(newItem);
+    saveLocalCatalogues(list);
     return newItem;
   },
 
   async deleteCatalogue(id: string): Promise<boolean> {
-    localCatalogues = localCatalogues.filter(c => c.id !== id);
+    let list = getLocalCatalogues();
+    list = list.filter(c => c.id !== id);
+    saveLocalCatalogues(list);
     return true;
   }
 };

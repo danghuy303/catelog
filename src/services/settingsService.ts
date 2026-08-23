@@ -1,19 +1,30 @@
 import { SiteSettings } from '../types/setting';
 import { MOCK_SITE_SETTINGS } from '../mock/settingsData';
+import { loadFromStorage, saveToStorage } from '../utils/storage';
 
-let currentSettings: SiteSettings = { ...MOCK_SITE_SETTINGS };
+const STORAGE_KEY = 'thienthanh_settings_db';
+
+function getLocalSettings(): SiteSettings {
+  return loadFromStorage<SiteSettings>(STORAGE_KEY, MOCK_SITE_SETTINGS);
+}
+
+function saveLocalSettings(settings: SiteSettings): void {
+  saveToStorage(STORAGE_KEY, settings);
+}
 
 export const settingsService = {
   async getSettings(): Promise<SiteSettings> {
-    return currentSettings;
+    return getLocalSettings();
   },
 
   async updateSettings(newSettings: Partial<SiteSettings>): Promise<SiteSettings> {
-    currentSettings = {
-      ...currentSettings,
+    const current = getLocalSettings();
+    const updated = {
+      ...current,
       ...newSettings,
       updatedAt: new Date().toISOString()
     };
-    return currentSettings;
+    saveLocalSettings(updated);
+    return updated;
   }
 };
