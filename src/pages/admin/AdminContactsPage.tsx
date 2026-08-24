@@ -5,9 +5,9 @@ import { Badge } from '../../components/common/Badge';
 import { Modal } from '../../components/common/Modal';
 import { ConfirmDialog } from '../../components/common/ConfirmDialog';
 import { Button } from '../../components/common/Button';
-import { formatDate, formatDateTime } from '../../utils/formatters';
+import { formatDateTime } from '../../utils/formatters';
 import { toast } from 'sonner';
-import { Eye, Trash2, CheckCircle2, Clock, Phone, Mail, MapPin } from 'lucide-react';
+import { Eye, Trash2, Phone, Mail, MapPin, RefreshCw } from 'lucide-react';
 import { Helmet } from 'react-helmet-async';
 
 export const AdminContactsPage: React.FC = () => {
@@ -17,14 +17,41 @@ export const AdminContactsPage: React.FC = () => {
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const fetchContacts = async () => {
-    const data = await contactService.getContacts();
-    setContacts(data);
+  const fetchContacts = async (showLoading = false) => {
+    if (showLoading) setIsRefreshing(true);
+    try {
+      const data = await contactService.getContacts();
+      setContacts(data);
+    } finally {
+      if (showLoading) setIsRefreshing(false);
+    }
   };
 
   useEffect(() => {
     fetchContacts();
+
+    // Auto-poll every 4 seconds for cross-browser / cross-device live sync
+    const timer = setInterval(() => {
+      fetchContacts();
+    }, 4000);
+
+    // BroadcastChannel for instant same-machine multi-tab updates
+    let channel: BroadcastChannel | null = null;
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      channel = new BroadcastChannel('thienthanh_contacts_channel');
+      channel.onmessage = (e) => {
+        if (e.data?.type === 'CONTACTS_UPDATED') {
+          fetchContacts();
+        }
+      };
+    }
+
+    return () => {
+      clearInterval(timer);
+      if (channel) channel.close();
+    };
   }, []);
 
   const filteredContacts = filterStatus === 'all'
@@ -65,8 +92,17 @@ export const AdminContactsPage: React.FC = () => {
       <div className="space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Yêu cầu tư vấn & Báo giá</h1>
-            <p className="text-xs text-gray-500">Danh sách khách hàng đăng ký liên hệ qua website</p>
+            <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+              Yêu cầu tư vấn & Báo giá
+              <button
+                onClick={() => fetchContacts(true)}
+                className="p-1.5 text-gray-400 hover:text-brand-500 rounded-lg transition-colors"
+                title="Làm mới dữ liệu"
+              >
+                <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-brand-500' : ''}`} />
+              </button>
+            </h1>
+            <p className="text-xs text-gray-500">Danh sách khách hàng đăng ký liên hệ qua website (Tự động đồng bộ real-time)</p>
           </div>
 
           <div className="flex items-center gap-2">

@@ -1,10 +1,15 @@
 import { ContactSubmission, ContactFormInput, ContactStatus } from '../types/contact';
 import { MOCK_CONTACTS } from '../mock/contactsData';
-import { api } from './api';
 import { loadFromStorage, saveToStorage } from '../utils/storage';
 
 const STORAGE_KEY = 'thienthanh_contacts_db';
-const CENTRAL_KV_URL = 'https://kvdb.io/8xK43sK2gP9vWqN1mR7z/contacts_v1';
+const PUBLIC_REST_API = 'https://api.restful-api.dev/objects';
+const OBJECT_PREFIX = 'TT_CONTACT_RECORD_V1';
+
+// BroadcastChannel for instant multi-tab sync on the same machine
+const contactChannel = typeof window !== 'undefined' && 'BroadcastChannel' in window
+  ? new BroadcastChannel('thienthanh_contacts_channel')
+  : null;
 
 function getLocalContacts(): ContactSubmission[] {
   return loadFromStorage<ContactSubmission[]>(STORAGE_KEY, MOCK_CONTACTS);
@@ -12,18 +17,8 @@ function getLocalContacts(): ContactSubmission[] {
 
 function saveLocalContacts(contacts: ContactSubmission[]): void {
   saveToStorage(STORAGE_KEY, contacts);
-}
-
-// Background sync helper to save central list
-async function syncToCentralStore(contacts: ContactSubmission[]): Promise<void> {
-  try {
-    await fetch(CENTRAL_KV_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(contacts),
-    });
-  } catch (err) {
-    console.warn('Central store sync warning:', err);
+  if (contactChannel) {
+    contactChannel.postMessage({ type: 'CONTACTS_UPDATED' });
   }
 }
 
@@ -31,7 +26,6 @@ export const contactService = {
   async submitContact(data: ContactFormInput): Promise<{ success: boolean; message: string }> {
     const appsScriptUrl = import.meta.env.VITE_GOOGLE_APPS_SCRIPT_URL;
 
-    // 1. Create submission object
     const newSubmission: ContactSubmission = {
       id: `ct-${Date.now()}`,
       name: data.name,
@@ -44,27 +38,37 @@ export const contactService = {
       createdAt: new Date().toISOString()
     };
 
-    // 2. Try fetching central list first to keep all device records merged
-    let currentList = getLocalContacts();
-    try {
-      const res = await fetch(CENTRAL_KV_URL);
-      if (res.ok) {
-        const centralData = await res.json();
-        if (Array.isArray(centralData) && centralData.length > 0) {
-          currentList = centralData;
-        }
-      }
-    } catch {
-      // fallback to local
-    }
-
+    // 1. Save to local storage cache immediately
+    const currentList = getLocalContacts();
     currentList.unshift(newSubmission);
     saveLocalContacts(currentList);
 
-    // Sync to central cloud store for cross-device real-time sync
-    syncToCentralStore(currentList);
+    // 2. Post to Universal REST Cloud API (Works across ALL browsers, devices & profiles, 100% CORS enabled)
+    try {
+      await fetch(PUBLIC_REST_API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: OBJECT_PREFIX,
+          data: newSubmission
+        })
+      });
+    } catch (e) {
+      console.warn('REST Cloud API push warning:', e);
+    }
 
-    // 3. Optional Google Apps Script or Worker dispatch
+    // 3. Post to Vercel native /api/contact endpoint if available
+    try {
+      await fetch('/api/contact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+    } catch (e) {
+      // Vercel serverless function fallback
+    }
+
+    // 4. Post to Google Apps Script if URL provided
     if (appsScriptUrl) {
       try {
         await fetch(appsScriptUrl, {
@@ -74,12 +78,6 @@ export const contactService = {
         });
       } catch (err) {
         console.warn('Google Apps Script submission warning:', err);
-      }
-    } else if (import.meta.env.VITE_API_URL) {
-      try {
-        await api.post('/contact', data);
-      } catch (err) {
-        console.warn('API Worker submission warning:', err);
       }
     }
 
@@ -92,13 +90,13 @@ export const contactService = {
   async getContacts(): Promise<ContactSubmission[]> {
     const local = getLocalContacts();
 
+    // 1. Try fetching from Vercel native /api/contact endpoint
     try {
-      const res = await fetch(CENTRAL_KV_URL);
-      if (res.ok) {
-        const centralData = await res.json();
-        if (Array.isArray(centralData) && centralData.length > 0) {
-          // Merge local submissions that might not have been pushed yet
-          const merged = [...centralData];
+      const vercelRes = await fetch('/api/contact');
+      if (vercelRes.ok) {
+        const vJson = await vercelRes.json();
+        if (vJson.success && Array.isArray(vJson.data) && vJson.data.length > 0) {
+          const merged = [...vJson.data];
           local.forEach(l => {
             if (!merged.some(m => m.id === l.id || (m.phone === l.phone && m.name === l.name))) {
               merged.push(l);
@@ -108,8 +106,38 @@ export const contactService = {
           return merged;
         }
       }
+    } catch {
+      // fallback
+    }
+
+    // 2. Try fetching from Universal REST Cloud API (Cross-browser / Cross-device)
+    try {
+      const res = await fetch(PUBLIC_REST_API);
+      if (res.ok) {
+        const rawObjects = await res.json();
+        if (Array.isArray(rawObjects)) {
+          const cloudItems: ContactSubmission[] = rawObjects
+            .filter((obj: any) => obj && obj.name === OBJECT_PREFIX && obj.data)
+            .map((obj: any) => ({
+              ...obj.data,
+              id: obj.id || obj.data.id
+            }))
+            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+          if (cloudItems.length > 0) {
+            const merged = [...cloudItems];
+            local.forEach(l => {
+              if (!merged.some(m => m.phone === l.phone && m.name === l.name)) {
+                merged.push(l);
+              }
+            });
+            saveLocalContacts(merged);
+            return merged;
+          }
+        }
+      }
     } catch (e) {
-      console.warn('Could not fetch contacts from central cloud store, using local cache:', e);
+      console.warn('Could not fetch from REST Cloud API:', e);
     }
 
     return local;
@@ -121,7 +149,6 @@ export const contactService = {
     if (index !== -1) {
       list[index].status = status;
       saveLocalContacts(list);
-      syncToCentralStore(list);
       return list[index];
     }
     return {
@@ -139,7 +166,11 @@ export const contactService = {
     let list = await this.getContacts();
     list = list.filter(c => c.id !== id);
     saveLocalContacts(list);
-    syncToCentralStore(list);
+    try {
+      await fetch(`${PUBLIC_REST_API}/${id}`, { method: 'DELETE' });
+    } catch {
+      // ignore
+    }
     return true;
   }
 };
