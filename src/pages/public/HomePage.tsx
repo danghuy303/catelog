@@ -16,7 +16,7 @@ import { newsService } from '../../services/newsService';
 import { ProductCategory } from '../../types/category';
 import { Product } from '../../types/product';
 import { NewsArticle } from '../../types/news';
-import { ArrowRight, Sparkles } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 import { Helmet } from 'react-helmet-async';
 
 export const HomePage: React.FC = () => {
@@ -26,22 +26,44 @@ export const HomePage: React.FC = () => {
   const [activeCategoryTab, setActiveCategoryTab] = useState<string>('all');
   const [loadingProducts, setLoadingProducts] = useState(true);
 
-  useEffect(() => {
-    async function loadData() {
-      try {
-        const [cats, prods, news] = await Promise.all([
-          categoryService.getProductCategories(),
-          productService.getProducts({ featured: true }),
-          newsService.getNews({ limit: 3 })
-        ]);
-        setCategories(cats);
-        setProducts(prods.data);
-        setNewsList(news.data.slice(0, 3));
-      } finally {
-        setLoadingProducts(false);
-      }
+  const loadData = async () => {
+    try {
+      const [cats, prods, news] = await Promise.all([
+        categoryService.getProductCategories(),
+        productService.getProducts({ status: 'published' }),
+        newsService.getNews({ status: 'published' })
+      ]);
+      setCategories(cats);
+      setProducts(prods.data);
+      setNewsList(news.data.slice(0, 3));
+    } finally {
+      setLoadingProducts(false);
     }
+  };
+
+  useEffect(() => {
     loadData();
+
+    // Listen to real-time BroadcastChannel updates
+    let pChannel: BroadcastChannel | null = null;
+    let nChannel: BroadcastChannel | null = null;
+
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      pChannel = new BroadcastChannel('thienthanh_products_channel');
+      nChannel = new BroadcastChannel('thienthanh_news_channel');
+
+      pChannel.onmessage = (e) => {
+        if (e.data?.type === 'PRODUCTS_UPDATED') loadData();
+      };
+      nChannel.onmessage = (e) => {
+        if (e.data?.type === 'NEWS_UPDATED') loadData();
+      };
+    }
+
+    return () => {
+      if (pChannel) pChannel.close();
+      if (nChannel) nChannel.close();
+    };
   }, []);
 
   const filteredProducts = activeCategoryTab === 'all'
@@ -120,7 +142,13 @@ export const HomePage: React.FC = () => {
           </div>
 
           {/* Product Grid */}
-          {filteredProducts.length > 0 ? (
+          {loadingProducts ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+              {[1, 2, 3, 4].map((i) => (
+                <div key={i} className="h-80 bg-slate-100 rounded-3xl animate-pulse" />
+              ))}
+            </div>
+          ) : filteredProducts.length > 0 ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
               {filteredProducts.map((p) => (
                 <ProductCard key={p.id} product={p} />

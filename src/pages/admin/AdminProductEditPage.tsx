@@ -82,14 +82,22 @@ export const AdminProductEditPage: React.FC = () => {
       return;
     }
 
-    if (images.length === 0) {
-      toast.error('Vui lòng tải lên ít nhất 1 hình ảnh sản phẩm');
-      return;
-    }
-
     setLoading(true);
 
-    const primaryImg = images.find(img => img.isPrimary) || images[0];
+    const defaultPlaceholder = 'https://images.unsplash.com/photo-1584269600464-37b1b58a9fe7?auto=format&fit=crop&w=800&q=80';
+    const finalImages: ProductImage[] = images.length > 0 ? images : [
+      {
+        id: `img-${Date.now()}`,
+        productId: id || `prod-${Date.now()}`,
+        imageUrl: defaultPlaceholder,
+        fileName: 'placeholder.jpg',
+        alt: name || 'Ảnh sản phẩm',
+        sortOrder: 0,
+        isPrimary: true
+      }
+    ];
+
+    const primaryImg = finalImages.find(img => img.isPrimary) || finalImages[0];
     const category = categories.find(c => c.id === categoryId);
 
     const payload: Partial<Product> = {
@@ -104,8 +112,8 @@ export const AdminProductEditPage: React.FC = () => {
       specification,
       shortDescription,
       description,
-      images,
-      thumbnailUrl: primaryImg.imageUrl,
+      images: finalImages,
+      thumbnailUrl: primaryImg.imageUrl || defaultPlaceholder,
       status,
       featured,
       seoTitle,

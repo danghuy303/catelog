@@ -10,7 +10,7 @@ import { Badge } from '../../components/common/Badge';
 import { ConfirmDialog } from '../../components/common/ConfirmDialog';
 import { formatDate } from '../../utils/formatters';
 import { toast } from 'sonner';
-import { Plus, Edit, Trash2, Eye, Star } from 'lucide-react';
+import { Plus, Edit, Trash2, Eye, Star, RefreshCw } from 'lucide-react';
 import { Helmet } from 'react-helmet-async';
 
 export const AdminProductsPage: React.FC = () => {
@@ -23,24 +23,50 @@ export const AdminProductsPage: React.FC = () => {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const fetchProducts = async () => {
-    setLoading(true);
-    const [pRes, cRes] = await Promise.all([
-      productService.getProducts({
-        search,
-        categorySlug: selectedCategory || undefined,
-        status: selectedStatus || undefined
-      }),
-      categoryService.getProductCategories()
-    ]);
-    setProducts(pRes.data);
-    setCategories(cRes);
-    setLoading(false);
+  const fetchProducts = async (showRefreshIndicator = false) => {
+    if (showRefreshIndicator) setIsRefreshing(true);
+    try {
+      const [pRes, cRes] = await Promise.all([
+        productService.getProducts({
+          search,
+          categorySlug: selectedCategory || undefined,
+          status: selectedStatus || undefined
+        }),
+        categoryService.getProductCategories()
+      ]);
+      setProducts(pRes.data);
+      setCategories(cRes);
+    } finally {
+      setLoading(false);
+      if (showRefreshIndicator) setIsRefreshing(false);
+    }
   };
 
   useEffect(() => {
     fetchProducts();
+
+    // Auto-poll every 4 seconds for cross-browser / cross-device live sync
+    const timer = setInterval(() => {
+      fetchProducts();
+    }, 4000);
+
+    // BroadcastChannel for instant same-machine multi-tab updates
+    let channel: BroadcastChannel | null = null;
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      channel = new BroadcastChannel('thienthanh_products_channel');
+      channel.onmessage = (e) => {
+        if (e.data?.type === 'PRODUCTS_UPDATED') {
+          fetchProducts();
+        }
+      };
+    }
+
+    return () => {
+      clearInterval(timer);
+      if (channel) channel.close();
+    };
   }, [search, selectedCategory, selectedStatus]);
 
   const handleDelete = async () => {
@@ -64,8 +90,17 @@ export const AdminProductsPage: React.FC = () => {
       <div className="space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Quản lý sản phẩm</h1>
-            <p className="text-xs text-gray-500">Danh sách các sản phẩm hiển thị trên website</p>
+            <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+              Quản lý sản phẩm
+              <button
+                onClick={() => fetchProducts(true)}
+                className="p-1.5 text-gray-400 hover:text-brand-500 rounded-lg transition-colors"
+                title="Làm mới danh sách"
+              >
+                <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-brand-500' : ''}`} />
+              </button>
+            </h1>
+            <p className="text-xs text-gray-500">Danh sách các sản phẩm hiển thị trên website (Tự động đồng bộ real-time)</p>
           </div>
           <Link to="/admin/products/create">
             <Button variant="primary" leftIcon={<Plus className="w-4 h-4" />}>

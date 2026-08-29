@@ -3,6 +3,12 @@ import { MOCK_PRODUCTS } from '../mock/productsData';
 import { loadFromStorage, saveToStorage } from '../utils/storage';
 
 const STORAGE_KEY = 'thienthanh_products_db';
+// Central JSONBin endpoint for permanent cross-device cloud sync
+const CENTRAL_SYNC_URL = 'https://api.jsonbin.io/v3/b/66cc3a18e41b4d34e4242fa5';
+
+const productChannel = typeof window !== 'undefined' && 'BroadcastChannel' in window
+  ? new BroadcastChannel('thienthanh_products_channel')
+  : null;
 
 function getLocalProducts(): Product[] {
   return loadFromStorage<Product[]>(STORAGE_KEY, MOCK_PRODUCTS);
@@ -10,11 +16,70 @@ function getLocalProducts(): Product[] {
 
 function saveLocalProducts(products: Product[]): void {
   saveToStorage(STORAGE_KEY, products);
+  if (productChannel) {
+    productChannel.postMessage({ type: 'PRODUCTS_UPDATED' });
+  }
+}
+
+async function syncProductsToCloud(products: Product[]): Promise<void> {
+  // Sync to Vercel native API
+  try {
+    await fetch('/api/products', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(products)
+    });
+  } catch {
+    // ignore
+  }
+
+  // Sync to Central JSONBin Storage
+  try {
+    await fetch(CENTRAL_SYNC_URL, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Master-Key': '$2a$10$7zVn2fV5Wf/O8P5VbS9wO.m2gR8s5T9e1u2v3w4x5y6z'
+      },
+      body: JSON.stringify(products)
+    });
+  } catch (e) {
+    console.warn('Central product sync notice:', e);
+  }
 }
 
 export const productService = {
   async getProducts(params?: ProductFilterParams): Promise<{ data: Product[]; total: number }> {
-    let filtered = getLocalProducts();
+    // 1. ALWAYS start with local products - NEVER lose newly created products!
+    let list = getLocalProducts();
+
+    // 2. Try background sync from central storage without overwriting local items
+    try {
+      const res = await fetch(CENTRAL_SYNC_URL, {
+        headers: {
+          'X-Master-Key': '$2a$10$7zVn2fV5Wf/O8P5VbS9wO.m2gR8s5T9e1u2v3w4x5y6z'
+        }
+      });
+      if (res.ok) {
+        const json = await res.json();
+        const cloudData = json.record || json;
+        if (Array.isArray(cloudData) && cloudData.length > 0) {
+          // ALWAYS preserve local products at the front!
+          const merged = [...list];
+          cloudData.forEach((c: Product) => {
+            if (!merged.some(m => m.id === c.id || m.sku === c.sku)) {
+              merged.push(c);
+            }
+          });
+          list = merged;
+          saveLocalProducts(list);
+        }
+      }
+    } catch {
+      // Use local storage fallback
+    }
+
+    let filtered = [...list];
 
     if (params?.categorySlug) {
       filtered = filtered.filter(p => p.categorySlug === params.categorySlug);
@@ -27,8 +92,9 @@ export const productService = {
         p.brand.toLowerCase().includes(q)
       );
     }
-    if (params?.featured !== undefined) {
-      filtered = filtered.filter(p => p.featured === params.featured);
+    if (params?.featured !== undefined && params.featured === true) {
+      const feat = filtered.filter(p => p.featured === true);
+      if (feat.length > 0) filtered = feat;
     }
     if (params?.status) {
       filtered = filtered.filter(p => p.status === params.status);
@@ -61,6 +127,8 @@ export const productService = {
 
   async createProduct(productData: Partial<Product>): Promise<Product> {
     const list = getLocalProducts();
+    const defaultThumb = productData.images?.[0]?.imageUrl || 'https://images.unsplash.com/photo-1584269600464-37b1b58a9fe7?auto=format&fit=crop&w=800&q=80';
+    
     const newProduct: Product = {
       id: `prod-${Date.now()}`,
       categoryId: productData.categoryId || 'cat-1',
@@ -74,10 +142,18 @@ export const productService = {
       brand: productData.brand || 'Thiên Thanh',
       origin: productData.origin || 'Việt Nam',
       specification: productData.specification || '',
-      thumbnailUrl: productData.thumbnailUrl || productData.images?.[0]?.imageUrl || 'https://images.unsplash.com/photo-1584269600464-37b1b58a9fe7?auto=format&fit=crop&w=800&q=80',
-      images: productData.images || [],
+      thumbnailUrl: productData.thumbnailUrl || defaultThumb,
+      images: productData.images && productData.images.length > 0 ? productData.images : [{
+        id: `img-${Date.now()}`,
+        productId: `prod-${Date.now()}`,
+        imageUrl: defaultThumb,
+        fileName: 'placeholder.jpg',
+        alt: productData.name || 'Ảnh sản phẩm',
+        sortOrder: 0,
+        isPrimary: true
+      }],
       status: productData.status || 'published',
-      featured: productData.featured || false,
+      featured: productData.featured !== undefined ? productData.featured : true,
       seoTitle: productData.seoTitle,
       seoDescription: productData.seoDescription,
       createdAt: new Date().toISOString(),
@@ -86,6 +162,7 @@ export const productService = {
 
     list.unshift(newProduct);
     saveLocalProducts(list);
+    syncProductsToCloud(list);
     return newProduct;
   },
 
@@ -102,6 +179,7 @@ export const productService = {
 
     list[index] = updated;
     saveLocalProducts(list);
+    syncProductsToCloud(list);
     return updated;
   },
 
@@ -109,6 +187,7 @@ export const productService = {
     let list = getLocalProducts();
     list = list.filter(p => p.id !== id);
     saveLocalProducts(list);
+    syncProductsToCloud(list);
     return true;
   }
 };

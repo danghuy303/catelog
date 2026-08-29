@@ -3,6 +3,12 @@ import { MOCK_NEWS } from '../mock/newsData';
 import { loadFromStorage, saveToStorage } from '../utils/storage';
 
 const STORAGE_KEY = 'thienthanh_news_db';
+const PUBLIC_REST_API = 'https://api.restful-api.dev/objects';
+const OBJECT_PREFIX = 'TT_NEWS_RECORD_V6';
+
+const newsChannel = typeof window !== 'undefined' && 'BroadcastChannel' in window
+  ? new BroadcastChannel('thienthanh_news_channel')
+  : null;
 
 function getLocalNews(): NewsArticle[] {
   return loadFromStorage<NewsArticle[]>(STORAGE_KEY, MOCK_NEWS);
@@ -10,11 +16,56 @@ function getLocalNews(): NewsArticle[] {
 
 function saveLocalNews(news: NewsArticle[]): void {
   saveToStorage(STORAGE_KEY, news);
+  if (newsChannel) {
+    newsChannel.postMessage({ type: 'NEWS_UPDATED' });
+  }
+}
+
+async function syncNewsToCloud(news: NewsArticle[]): Promise<void> {
+  try {
+    await fetch(PUBLIC_REST_API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: OBJECT_PREFIX,
+        data: news
+      })
+    });
+  } catch (e) {
+    console.warn('Cloud news sync warning:', e);
+  }
 }
 
 export const newsService = {
   async getNews(params?: NewsFilterParams): Promise<{ data: NewsArticle[]; total: number }> {
-    let filtered = getLocalNews();
+    let list = getLocalNews();
+
+    if (!import.meta.env.DEV) {
+      try {
+        const res = await fetch(PUBLIC_REST_API);
+        if (res.ok) {
+          const rawObjects = await res.json();
+          if (Array.isArray(rawObjects)) {
+            const cloudObj = [...rawObjects].reverse().find((obj: any) => obj && obj.name === OBJECT_PREFIX && Array.isArray(obj.data));
+            if (cloudObj && Array.isArray(cloudObj.data) && cloudObj.data.length > 0) {
+              const cloudList: NewsArticle[] = cloudObj.data;
+              const merged = [...cloudList];
+              list.forEach(l => {
+                if (!merged.some(m => m.id === l.id || m.slug === l.slug)) {
+                  merged.unshift(l);
+                }
+              });
+              list = merged;
+              saveToStorage(STORAGE_KEY, list);
+            }
+          }
+        }
+      } catch {
+        // fallback
+      }
+    }
+
+    let filtered = [...list];
 
     if (params?.categorySlug) {
       filtered = filtered.filter(n => n.categorySlug === params.categorySlug);
@@ -47,7 +98,7 @@ export const newsService = {
   },
 
   async createNews(data: Partial<NewsArticle>): Promise<NewsArticle> {
-    const currentList = getLocalNews();
+    const list = getLocalNews();
     const newArticle: NewsArticle = {
       id: `news-${Date.now()}`,
       categoryId: data.categoryId || 'ncat-1',
@@ -66,30 +117,42 @@ export const newsService = {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
-    currentList.unshift(newArticle);
-    saveLocalNews(currentList);
+    list.unshift(newArticle);
+    saveLocalNews(list);
+
+    if (!import.meta.env.DEV) {
+      syncNewsToCloud(list);
+    }
     return newArticle;
   },
 
   async updateNews(id: string, data: Partial<NewsArticle>): Promise<NewsArticle> {
-    const currentList = getLocalNews();
-    const index = currentList.findIndex(n => n.id === id);
+    const list = getLocalNews();
+    const index = list.findIndex(n => n.id === id);
     if (index === -1) throw new Error('Không tìm thấy bài viết');
 
     const updated: NewsArticle = {
-      ...currentList[index],
+      ...list[index],
       ...data,
       updatedAt: new Date().toISOString()
     };
-    currentList[index] = updated;
-    saveLocalNews(currentList);
+    list[index] = updated;
+    saveLocalNews(list);
+
+    if (!import.meta.env.DEV) {
+      syncNewsToCloud(list);
+    }
     return updated;
   },
 
   async deleteNews(id: string): Promise<boolean> {
-    let currentList = getLocalNews();
-    currentList = currentList.filter(n => n.id !== id);
-    saveLocalNews(currentList);
+    let list = getLocalNews();
+    list = list.filter(n => n.id !== id);
+    saveLocalNews(list);
+
+    if (!import.meta.env.DEV) {
+      syncNewsToCloud(list);
+    }
     return true;
   }
 };
