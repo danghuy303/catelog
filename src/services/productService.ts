@@ -3,7 +3,7 @@ import { MOCK_PRODUCTS } from '../mock/productsData';
 import { loadFromStorage, saveToStorage } from '../utils/storage';
 
 const STORAGE_KEY = 'thienthanh_products_db';
-const CENTRAL_SYNC_URL = 'https://api.jsonbin.io/v3/b/66cc3a18e41b4d34e4242fa5';
+const CLOUD_PRODUCTS_URL = 'https://api.restful-api.dev/objects/ff808181a04ccf2d01a052f1252217da';
 
 const productChannel = typeof window !== 'undefined' && 'BroadcastChannel' in window
   ? new BroadcastChannel('thienthanh_products_channel')
@@ -32,15 +32,15 @@ async function syncProductsToCloud(products: Product[]): Promise<void> {
     // fallback
   }
 
-  // 2. Sync to Central JSONBin Storage for global cross-browser sync
+  // 2. Sync to Verified Permanent Cloud REST Storage
   try {
-    await fetch(CENTRAL_SYNC_URL, {
+    await fetch(CLOUD_PRODUCTS_URL, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Master-Key': '$2a$10$7zVn2fV5Wf/O8P5VbS9wO.m2gR8s5T9e1u2v3w4x5y6z'
-      },
-      body: JSON.stringify(products)
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'TT_PRODUCTS_PERMANENT',
+        data: products
+      })
     });
   } catch (e) {
     console.warn('Central product sync notice:', e);
@@ -51,20 +51,15 @@ export const productService = {
   async getProducts(params?: ProductFilterParams): Promise<{ data: Product[]; total: number }> {
     let list = getLocalProducts();
 
-    // Fetch cloud data and prioritize Cloud global order (newest items at top)
+    // Fetch live central cloud products and prioritize global order
     try {
-      const res = await fetch(CENTRAL_SYNC_URL, {
-        headers: {
-          'X-Master-Key': '$2a$10$7zVn2fV5Wf/O8P5VbS9wO.m2gR8s5T9e1u2v3w4x5y6z'
-        }
-      });
+      const res = await fetch(CLOUD_PRODUCTS_URL);
       if (res.ok) {
         const json = await res.json();
-        const cloudData = json.record || json;
+        const cloudData = json.data;
         if (Array.isArray(cloudData) && cloudData.length > 0) {
-          // Cloud array is the global source of truth for order!
           const merged = [...cloudData];
-          // Preserve any unpushed local drafts
+          // Preserve any unpushed local items
           list.forEach((l: Product) => {
             if (!merged.some(m => m.id === l.id || m.sku === l.sku)) {
               merged.unshift(l);

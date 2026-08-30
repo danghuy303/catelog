@@ -3,7 +3,7 @@ import { MOCK_NEWS } from '../mock/newsData';
 import { loadFromStorage, saveToStorage } from '../utils/storage';
 
 const STORAGE_KEY = 'thienthanh_news_db';
-const CENTRAL_NEWS_SYNC_URL = 'https://api.jsonbin.io/v3/b/66cc3a18e41b4d34e4242fa6';
+const CLOUD_NEWS_URL = 'https://api.restful-api.dev/objects/ff808181a04ccf2d01a052f1255117db';
 
 const newsChannel = typeof window !== 'undefined' && 'BroadcastChannel' in window
   ? new BroadcastChannel('thienthanh_news_channel')
@@ -22,13 +22,13 @@ function saveLocalNews(news: NewsArticle[]): void {
 
 async function syncNewsToCloud(news: NewsArticle[]): Promise<void> {
   try {
-    await fetch(CENTRAL_NEWS_SYNC_URL, {
+    await fetch(CLOUD_NEWS_URL, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Master-Key': '$2a$10$7zVn2fV5Wf/O8P5VbS9wO.m2gR8s5T9e1u2v3w4x5y6z'
-      },
-      body: JSON.stringify(news)
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'TT_NEWS_PERMANENT',
+        data: news
+      })
     });
   } catch (e) {
     console.warn('Cloud news sync warning:', e);
@@ -40,14 +40,10 @@ export const newsService = {
     let list = getLocalNews();
 
     try {
-      const res = await fetch(CENTRAL_NEWS_SYNC_URL, {
-        headers: {
-          'X-Master-Key': '$2a$10$7zVn2fV5Wf/O8P5VbS9wO.m2gR8s5T9e1u2v3w4x5y6z'
-        }
-      });
+      const res = await fetch(CLOUD_NEWS_URL);
       if (res.ok) {
         const json = await res.json();
-        const cloudData = json.record || json;
+        const cloudData = json.data;
         if (Array.isArray(cloudData) && cloudData.length > 0) {
           const merged = [...cloudData];
           list.forEach((l: NewsArticle) => {
