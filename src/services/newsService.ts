@@ -3,8 +3,7 @@ import { MOCK_NEWS } from '../mock/newsData';
 import { loadFromStorage, saveToStorage } from '../utils/storage';
 
 const STORAGE_KEY = 'thienthanh_news_db';
-const PUBLIC_REST_API = 'https://api.restful-api.dev/objects';
-const OBJECT_PREFIX = 'TT_NEWS_RECORD_V6';
+const CENTRAL_NEWS_SYNC_URL = 'https://api.jsonbin.io/v3/b/66cc3a18e41b4d34e4242fa6';
 
 const newsChannel = typeof window !== 'undefined' && 'BroadcastChannel' in window
   ? new BroadcastChannel('thienthanh_news_channel')
@@ -23,13 +22,13 @@ function saveLocalNews(news: NewsArticle[]): void {
 
 async function syncNewsToCloud(news: NewsArticle[]): Promise<void> {
   try {
-    await fetch(PUBLIC_REST_API, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: OBJECT_PREFIX,
-        data: news
-      })
+    await fetch(CENTRAL_NEWS_SYNC_URL, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Master-Key': '$2a$10$7zVn2fV5Wf/O8P5VbS9wO.m2gR8s5T9e1u2v3w4x5y6z'
+      },
+      body: JSON.stringify(news)
     });
   } catch (e) {
     console.warn('Cloud news sync warning:', e);
@@ -40,29 +39,28 @@ export const newsService = {
   async getNews(params?: NewsFilterParams): Promise<{ data: NewsArticle[]; total: number }> {
     let list = getLocalNews();
 
-    if (!import.meta.env.DEV) {
-      try {
-        const res = await fetch(PUBLIC_REST_API);
-        if (res.ok) {
-          const rawObjects = await res.json();
-          if (Array.isArray(rawObjects)) {
-            const cloudObj = [...rawObjects].reverse().find((obj: any) => obj && obj.name === OBJECT_PREFIX && Array.isArray(obj.data));
-            if (cloudObj && Array.isArray(cloudObj.data) && cloudObj.data.length > 0) {
-              const cloudList: NewsArticle[] = cloudObj.data;
-              const merged = [...cloudList];
-              list.forEach(l => {
-                if (!merged.some(m => m.id === l.id || m.slug === l.slug)) {
-                  merged.unshift(l);
-                }
-              });
-              list = merged;
-              saveToStorage(STORAGE_KEY, list);
-            }
-          }
+    try {
+      const res = await fetch(CENTRAL_NEWS_SYNC_URL, {
+        headers: {
+          'X-Master-Key': '$2a$10$7zVn2fV5Wf/O8P5VbS9wO.m2gR8s5T9e1u2v3w4x5y6z'
         }
-      } catch {
-        // fallback
+      });
+      if (res.ok) {
+        const json = await res.json();
+        const cloudData = json.record || json;
+        if (Array.isArray(cloudData) && cloudData.length > 0) {
+          const merged = [...cloudData];
+          list.forEach((l: NewsArticle) => {
+            if (!merged.some(m => m.id === l.id || m.slug === l.slug)) {
+              merged.unshift(l);
+            }
+          });
+          list = merged;
+          saveLocalNews(list);
+        }
       }
+    } catch {
+      // Use local storage fallback
     }
 
     let filtered = [...list];
@@ -119,10 +117,7 @@ export const newsService = {
     };
     list.unshift(newArticle);
     saveLocalNews(list);
-
-    if (!import.meta.env.DEV) {
-      syncNewsToCloud(list);
-    }
+    syncNewsToCloud(list);
     return newArticle;
   },
 
@@ -138,10 +133,7 @@ export const newsService = {
     };
     list[index] = updated;
     saveLocalNews(list);
-
-    if (!import.meta.env.DEV) {
-      syncNewsToCloud(list);
-    }
+    syncNewsToCloud(list);
     return updated;
   },
 
@@ -149,10 +141,7 @@ export const newsService = {
     let list = getLocalNews();
     list = list.filter(n => n.id !== id);
     saveLocalNews(list);
-
-    if (!import.meta.env.DEV) {
-      syncNewsToCloud(list);
-    }
+    syncNewsToCloud(list);
     return true;
   }
 };

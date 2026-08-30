@@ -3,7 +3,6 @@ import { MOCK_PRODUCTS } from '../mock/productsData';
 import { loadFromStorage, saveToStorage } from '../utils/storage';
 
 const STORAGE_KEY = 'thienthanh_products_db';
-// Central JSONBin endpoint for permanent cross-device cloud sync
 const CENTRAL_SYNC_URL = 'https://api.jsonbin.io/v3/b/66cc3a18e41b4d34e4242fa5';
 
 const productChannel = typeof window !== 'undefined' && 'BroadcastChannel' in window
@@ -22,7 +21,7 @@ function saveLocalProducts(products: Product[]): void {
 }
 
 async function syncProductsToCloud(products: Product[]): Promise<void> {
-  // Sync to Vercel native API
+  // 1. Sync to Vercel native API
   try {
     await fetch('/api/products', {
       method: 'POST',
@@ -30,10 +29,10 @@ async function syncProductsToCloud(products: Product[]): Promise<void> {
       body: JSON.stringify(products)
     });
   } catch {
-    // ignore
+    // fallback
   }
 
-  // Sync to Central JSONBin Storage
+  // 2. Sync to Central JSONBin Storage for global cross-browser sync
   try {
     await fetch(CENTRAL_SYNC_URL, {
       method: 'PUT',
@@ -50,10 +49,9 @@ async function syncProductsToCloud(products: Product[]): Promise<void> {
 
 export const productService = {
   async getProducts(params?: ProductFilterParams): Promise<{ data: Product[]; total: number }> {
-    // 1. ALWAYS start with local products - NEVER lose newly created products!
     let list = getLocalProducts();
 
-    // 2. Try background sync from central storage without overwriting local items
+    // Fetch cloud data and prioritize Cloud global order (newest items at top)
     try {
       const res = await fetch(CENTRAL_SYNC_URL, {
         headers: {
@@ -64,11 +62,12 @@ export const productService = {
         const json = await res.json();
         const cloudData = json.record || json;
         if (Array.isArray(cloudData) && cloudData.length > 0) {
-          // ALWAYS preserve local products at the front!
-          const merged = [...list];
-          cloudData.forEach((c: Product) => {
-            if (!merged.some(m => m.id === c.id || m.sku === c.sku)) {
-              merged.push(c);
+          // Cloud array is the global source of truth for order!
+          const merged = [...cloudData];
+          // Preserve any unpushed local drafts
+          list.forEach((l: Product) => {
+            if (!merged.some(m => m.id === l.id || m.sku === l.sku)) {
+              merged.unshift(l);
             }
           });
           list = merged;
