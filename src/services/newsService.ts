@@ -1,26 +1,20 @@
 import { NewsArticle, NewsFilterParams } from '../types/news';
 import { MOCK_NEWS } from '../mock/newsData';
 import { loadFromStorage, saveToStorage } from '../utils/storage';
+import { realtimeSync } from './realtimeService';
 
 const STORAGE_KEY = 'thienthanh_news_db';
 const CLOUD_NEWS_URL = 'https://api.restful-api.dev/objects/ff808181a04ccf2d01a052f1255117db';
 
-const newsChannel = typeof window !== 'undefined' && 'BroadcastChannel' in window
-  ? new BroadcastChannel('thienthanh_news_channel')
-  : null;
+let memoryNews: NewsArticle[] = loadFromStorage<NewsArticle[]>(STORAGE_KEY, MOCK_NEWS);
 
-function getLocalNews(): NewsArticle[] {
-  return loadFromStorage<NewsArticle[]>(STORAGE_KEY, MOCK_NEWS);
-}
-
-function saveLocalNews(news: NewsArticle[]): void {
+function persistNews(news: NewsArticle[]): void {
+  memoryNews = news;
   saveToStorage(STORAGE_KEY, news);
-  if (newsChannel) {
-    newsChannel.postMessage({ type: 'NEWS_UPDATED' });
-  }
+  realtimeSync.publish('NEWS_CHANGED', news);
 }
 
-async function syncNewsToCloud(news: NewsArticle[]): Promise<void> {
+async function pushNewsToCloud(news: NewsArticle[]): Promise<void> {
   try {
     await fetch(CLOUD_NEWS_URL, {
       method: 'PUT',
@@ -31,13 +25,13 @@ async function syncNewsToCloud(news: NewsArticle[]): Promise<void> {
       })
     });
   } catch (e) {
-    console.warn('Cloud news sync warning:', e);
+    console.warn('Cloud news sync notice:', e);
   }
 }
 
 export const newsService = {
   async getNews(params?: NewsFilterParams): Promise<{ data: NewsArticle[]; total: number }> {
-    let list = getLocalNews();
+    let list = [...memoryNews];
 
     try {
       const res = await fetch(CLOUD_NEWS_URL);
@@ -51,12 +45,16 @@ export const newsService = {
               merged.unshift(l);
             }
           });
-          list = merged;
-          saveLocalNews(list);
+          if (JSON.stringify(merged) !== JSON.stringify(memoryNews)) {
+            memoryNews = merged;
+            saveToStorage(STORAGE_KEY, merged);
+            realtimeSync.publish('NEWS_CHANGED', merged);
+          }
+          list = memoryNews;
         }
       }
     } catch {
-      // Use local storage fallback
+      // Use local memory fallback
     }
 
     let filtered = [...list];
@@ -82,17 +80,16 @@ export const newsService = {
   },
 
   async getNewsBySlug(categorySlug: string, slug: string): Promise<NewsArticle | null> {
-    const list = getLocalNews();
+    const list = memoryNews;
     return list.find(n => n.slug === slug || n.id === slug) || null;
   },
 
   async getNewsById(id: string): Promise<NewsArticle | null> {
-    const list = getLocalNews();
+    const list = memoryNews;
     return list.find(n => n.id === id) || null;
   },
 
   async createNews(data: Partial<NewsArticle>): Promise<NewsArticle> {
-    const list = getLocalNews();
     const newArticle: NewsArticle = {
       id: `news-${Date.now()}`,
       categoryId: data.categoryId || 'ncat-1',
@@ -111,33 +108,36 @@ export const newsService = {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
-    list.unshift(newArticle);
-    saveLocalNews(list);
-    syncNewsToCloud(list);
+
+    const updatedList = [newArticle, ...memoryNews];
+    persistNews(updatedList);
+    pushNewsToCloud(updatedList);
+
     return newArticle;
   },
 
   async updateNews(id: string, data: Partial<NewsArticle>): Promise<NewsArticle> {
-    const list = getLocalNews();
-    const index = list.findIndex(n => n.id === id);
+    const index = memoryNews.findIndex(n => n.id === id);
     if (index === -1) throw new Error('Không tìm thấy bài viết');
 
     const updated: NewsArticle = {
-      ...list[index],
+      ...memoryNews[index],
       ...data,
       updatedAt: new Date().toISOString()
     };
-    list[index] = updated;
-    saveLocalNews(list);
-    syncNewsToCloud(list);
+
+    const updatedList = [...memoryNews];
+    updatedList[index] = updated;
+    persistNews(updatedList);
+    pushNewsToCloud(updatedList);
+
     return updated;
   },
 
   async deleteNews(id: string): Promise<boolean> {
-    let list = getLocalNews();
-    list = list.filter(n => n.id !== id);
-    saveLocalNews(list);
-    syncNewsToCloud(list);
+    const updatedList = memoryNews.filter(n => n.id !== id);
+    persistNews(updatedList);
+    pushNewsToCloud(updatedList);
     return true;
   }
 };

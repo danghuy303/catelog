@@ -13,6 +13,7 @@ import { Button } from '../../components/common/Button';
 import { categoryService } from '../../services/categoryService';
 import { productService } from '../../services/productService';
 import { newsService } from '../../services/newsService';
+import { realtimeSync } from '../../services/realtimeService';
 import { ProductCategory } from '../../types/category';
 import { Product } from '../../types/product';
 import { NewsArticle } from '../../types/news';
@@ -44,25 +45,23 @@ export const HomePage: React.FC = () => {
   useEffect(() => {
     loadData();
 
-    // Listen to real-time BroadcastChannel updates
-    let pChannel: BroadcastChannel | null = null;
-    let nChannel: BroadcastChannel | null = null;
+    // 1. Subscribe to Realtime Data Synchronization Engine
+    const unSubProduct = realtimeSync.subscribe('PRODUCT_CHANGED', () => {
+      loadData();
+    });
+    const unSubNews = realtimeSync.subscribe('NEWS_CHANGED', () => {
+      loadData();
+    });
 
-    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
-      pChannel = new BroadcastChannel('thienthanh_products_channel');
-      nChannel = new BroadcastChannel('thienthanh_news_channel');
-
-      pChannel.onmessage = (e) => {
-        if (e.data?.type === 'PRODUCTS_UPDATED') loadData();
-      };
-      nChannel.onmessage = (e) => {
-        if (e.data?.type === 'NEWS_UPDATED') loadData();
-      };
-    }
+    // 2. Auto-poll every 3 seconds for live multi-device sync
+    const timer = setInterval(() => {
+      loadData();
+    }, 3000);
 
     return () => {
-      if (pChannel) pChannel.close();
-      if (nChannel) nChannel.close();
+      unSubProduct();
+      unSubNews();
+      clearInterval(timer);
     };
   }, []);
 

@@ -6,6 +6,7 @@ import { SearchInput } from '../../components/common/SearchInput';
 import { Pagination } from '../../components/common/Pagination';
 import { productService } from '../../services/productService';
 import { categoryService } from '../../services/categoryService';
+import { realtimeSync } from '../../services/realtimeService';
 import { ProductCategory } from '../../types/category';
 import { Product } from '../../types/product';
 import { Helmet } from 'react-helmet-async';
@@ -49,6 +50,21 @@ export const ProductsPage: React.FC = () => {
     }
 
     fetchProducts();
+
+    // 1. Subscribe to Realtime Data Synchronization Engine
+    const unsubscribe = realtimeSync.subscribe('PRODUCT_CHANGED', () => {
+      fetchProducts();
+    });
+
+    // 2. Auto-poll every 3 seconds for live multi-device sync
+    const timer = setInterval(() => {
+      fetchProducts();
+    }, 3000);
+
+    return () => {
+      unsubscribe();
+      clearInterval(timer);
+    };
   }, [categorySlug, searchTerm]);
 
   const pageTitle = currentCategory ? currentCategory.name : 'Tất cả sản phẩm';

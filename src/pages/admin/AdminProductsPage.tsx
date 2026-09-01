@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { productService } from '../../services/productService';
 import { categoryService } from '../../services/categoryService';
+import { realtimeSync } from '../../services/realtimeService';
 import { Product } from '../../types/product';
 import { ProductCategory } from '../../types/category';
 import { Button } from '../../components/common/Button';
@@ -22,7 +23,7 @@ export const AdminProductsPage: React.FC = () => {
   const [selectedStatus, setSelectedStatus] = useState('');
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const fetchProducts = async (showRefreshIndicator = false) => {
@@ -47,25 +48,23 @@ export const AdminProductsPage: React.FC = () => {
   useEffect(() => {
     fetchProducts();
 
-    // Auto-poll every 4 seconds for cross-browser / cross-device live sync
+    // 1. Subscribe to Realtime Data Synchronization Engine
+    const unsubscribe = realtimeSync.subscribe('PRODUCT_CHANGED', (newProducts: Product[]) => {
+      if (Array.isArray(newProducts) && !search && !selectedCategory && !selectedStatus) {
+        setProducts(newProducts);
+      } else {
+        fetchProducts();
+      }
+    });
+
+    // 2. Auto-poll every 3 seconds for live multi-device sync
     const timer = setInterval(() => {
       fetchProducts();
-    }, 4000);
-
-    // BroadcastChannel for instant same-machine multi-tab updates
-    let channel: BroadcastChannel | null = null;
-    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
-      channel = new BroadcastChannel('thienthanh_products_channel');
-      channel.onmessage = (e) => {
-        if (e.data?.type === 'PRODUCTS_UPDATED') {
-          fetchProducts();
-        }
-      };
-    }
+    }, 3000);
 
     return () => {
+      unsubscribe();
       clearInterval(timer);
-      if (channel) channel.close();
     };
   }, [search, selectedCategory, selectedStatus]);
 
@@ -100,7 +99,7 @@ export const AdminProductsPage: React.FC = () => {
                 <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-brand-500' : ''}`} />
               </button>
             </h1>
-            <p className="text-xs text-gray-500">Danh sách các sản phẩm hiển thị trên website (Tự động đồng bộ real-time)</p>
+            <p className="text-xs text-gray-500">Danh sách các sản phẩm hiển thị trên website (Tự động đồng bộ Realtime)</p>
           </div>
           <Link to="/admin/products/create">
             <Button variant="primary" leftIcon={<Plus className="w-4 h-4" />}>
@@ -160,7 +159,7 @@ export const AdminProductsPage: React.FC = () => {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {products.map((p) => (
-                  <tr key={p.id} className="hover:bg-slate-50">
+                  <tr key={p.id} className="hover:bg-slate-50 transition-colors">
                     <td className="py-3 px-4">
                       <img src={p.thumbnailUrl} alt={p.name} className="w-12 h-12 rounded-xl object-cover" />
                     </td>
