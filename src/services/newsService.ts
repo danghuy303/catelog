@@ -5,7 +5,11 @@ import { realtimeSync } from './realtimeService';
 
 const STORAGE_KEY = 'thienthanh_news_db';
 
-let memoryNews: NewsArticle[] = loadFromStorage<NewsArticle[]>(STORAGE_KEY, MOCK_NEWS);
+function getLocalNews(): NewsArticle[] {
+  return loadFromStorage<NewsArticle[]>(STORAGE_KEY, MOCK_NEWS);
+}
+
+let memoryNews: NewsArticle[] = getLocalNews();
 
 realtimeSync.subscribe('NEWS_CHANGED', (newNews: NewsArticle[]) => {
   if (Array.isArray(newNews) && newNews.length > 0) {
@@ -24,6 +28,7 @@ function persistNews(news: NewsArticle[]): void {
 
 export const newsService = {
   async getNews(params?: NewsFilterParams): Promise<{ data: NewsArticle[]; total: number }> {
+    memoryNews = getLocalNews();
     let filtered = [...memoryNews];
 
     if (params?.categorySlug) {
@@ -47,16 +52,17 @@ export const newsService = {
   },
 
   async getNewsBySlug(categorySlug: string, slug: string): Promise<NewsArticle | null> {
-    const list = memoryNews;
+    const list = getLocalNews();
     return list.find(n => n.slug === slug || n.id === slug) || null;
   },
 
   async getNewsById(id: string): Promise<NewsArticle | null> {
-    const list = memoryNews;
+    const list = getLocalNews();
     return list.find(n => n.id === id) || null;
   },
 
   async createNews(data: Partial<NewsArticle>): Promise<NewsArticle> {
+    const currentList = getLocalNews();
     const newArticle: NewsArticle = {
       id: `news-${Date.now()}`,
       categoryId: data.categoryId || 'ncat-1',
@@ -76,23 +82,24 @@ export const newsService = {
       updatedAt: new Date().toISOString()
     };
 
-    const updatedList = [newArticle, ...memoryNews];
+    const updatedList = [newArticle, ...currentList];
     persistNews(updatedList);
 
     return newArticle;
   },
 
   async updateNews(id: string, data: Partial<NewsArticle>): Promise<NewsArticle> {
-    const index = memoryNews.findIndex(n => n.id === id);
+    const currentList = getLocalNews();
+    const index = currentList.findIndex(n => n.id === id);
     if (index === -1) throw new Error('Không tìm thấy bài viết');
 
     const updated: NewsArticle = {
-      ...memoryNews[index],
+      ...currentList[index],
       ...data,
       updatedAt: new Date().toISOString()
     };
 
-    const updatedList = [...memoryNews];
+    const updatedList = [...currentList];
     updatedList[index] = updated;
     persistNews(updatedList);
 
@@ -100,7 +107,8 @@ export const newsService = {
   },
 
   async deleteNews(id: string): Promise<boolean> {
-    const updatedList = memoryNews.filter(n => n.id !== id);
+    const currentList = getLocalNews();
+    const updatedList = currentList.filter(n => n.id !== id);
     persistNews(updatedList);
     return true;
   }

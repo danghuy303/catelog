@@ -5,8 +5,12 @@ import { realtimeSync } from './realtimeService';
 
 const STORAGE_KEY = 'thienthanh_products_db';
 
+function getLocalProducts(): Product[] {
+  return loadFromStorage<Product[]>(STORAGE_KEY, MOCK_PRODUCTS);
+}
+
 // Reactive in-memory store for instant 0ms access across all views
-let memoryProducts: Product[] = loadFromStorage<Product[]>(STORAGE_KEY, MOCK_PRODUCTS);
+let memoryProducts: Product[] = getLocalProducts();
 
 // Listen to realtimeSync for cross-window / cross-device incoming product updates
 realtimeSync.subscribe('PRODUCT_CHANGED', (newProducts: Product[]) => {
@@ -38,7 +42,8 @@ async function pushProductsToCloud(products: Product[]): Promise<void> {
 
 export const productService = {
   async getProducts(params?: ProductFilterParams): Promise<{ data: Product[]; total: number }> {
-    // Always return authoritative memoryProducts store - NEVER overwrite with null cloud responses
+    // ALWAYS reload latest products from LocalStorage to pick up any new additions instantly!
+    memoryProducts = getLocalProducts();
     let filtered = [...memoryProducts];
 
     if (params?.categorySlug) {
@@ -67,25 +72,26 @@ export const productService = {
   },
 
   async getProductBySlug(categorySlug: string, productSlug: string): Promise<Product | null> {
-    const list = memoryProducts;
+    const list = getLocalProducts();
     const found = list.find(p => p.slug === productSlug || p.id === productSlug);
     return found || null;
   },
 
   async getProductById(id: string): Promise<Product | null> {
-    const list = memoryProducts;
+    const list = getLocalProducts();
     const found = list.find(p => p.id === id);
     return found || null;
   },
 
   async getRelatedProducts(categoryId: string, currentProductId: string, limit = 4): Promise<Product[]> {
-    const list = memoryProducts;
+    const list = getLocalProducts();
     return list
       .filter(p => p.categoryId === categoryId && p.id !== currentProductId && p.status === 'published')
       .slice(0, limit);
   },
 
   async createProduct(productData: Partial<Product>): Promise<Product> {
+    const currentList = getLocalProducts();
     const defaultThumb = productData.images?.[0]?.imageUrl || 'https://images.unsplash.com/photo-1584269600464-37b1b58a9fe7?auto=format&fit=crop&w=800&q=80';
     
     const newProduct: Product = {
@@ -119,7 +125,7 @@ export const productService = {
       updatedAt: new Date().toISOString()
     };
 
-    const updatedList = [newProduct, ...memoryProducts];
+    const updatedList = [newProduct, ...currentList];
     persistProducts(updatedList);
     pushProductsToCloud(updatedList);
 
@@ -127,16 +133,17 @@ export const productService = {
   },
 
   async updateProduct(id: string, productData: Partial<Product>): Promise<Product> {
-    const index = memoryProducts.findIndex(p => p.id === id);
+    const currentList = getLocalProducts();
+    const index = currentList.findIndex(p => p.id === id);
     if (index === -1) throw new Error('Không tìm thấy sản phẩm');
 
     const updated: Product = {
-      ...memoryProducts[index],
+      ...currentList[index],
       ...productData,
       updatedAt: new Date().toISOString()
     };
 
-    const updatedList = [...memoryProducts];
+    const updatedList = [...currentList];
     updatedList[index] = updated;
     persistProducts(updatedList);
     pushProductsToCloud(updatedList);
@@ -145,7 +152,8 @@ export const productService = {
   },
 
   async deleteProduct(id: string): Promise<boolean> {
-    const updatedList = memoryProducts.filter(p => p.id !== id);
+    const currentList = getLocalProducts();
+    const updatedList = currentList.filter(p => p.id !== id);
     persistProducts(updatedList);
     pushProductsToCloud(updatedList);
     return true;
