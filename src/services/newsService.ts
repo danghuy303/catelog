@@ -4,9 +4,17 @@ import { loadFromStorage, saveToStorage } from '../utils/storage';
 import { realtimeSync } from './realtimeService';
 
 const STORAGE_KEY = 'thienthanh_news_db';
-const CLOUD_NEWS_URL = 'https://api.restful-api.dev/objects/ff808181a04ccf2d01a052f1255117db';
 
 let memoryNews: NewsArticle[] = loadFromStorage<NewsArticle[]>(STORAGE_KEY, MOCK_NEWS);
+
+realtimeSync.subscribe('NEWS_CHANGED', (newNews: NewsArticle[]) => {
+  if (Array.isArray(newNews) && newNews.length > 0) {
+    if (JSON.stringify(newNews) !== JSON.stringify(memoryNews)) {
+      memoryNews = newNews;
+      saveToStorage(STORAGE_KEY, newNews);
+    }
+  }
+});
 
 function persistNews(news: NewsArticle[]): void {
   memoryNews = news;
@@ -14,50 +22,9 @@ function persistNews(news: NewsArticle[]): void {
   realtimeSync.publish('NEWS_CHANGED', news);
 }
 
-async function pushNewsToCloud(news: NewsArticle[]): Promise<void> {
-  try {
-    await fetch(CLOUD_NEWS_URL, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: 'TT_NEWS_PERMANENT',
-        data: news
-      })
-    });
-  } catch (e) {
-    console.warn('Cloud news sync notice:', e);
-  }
-}
-
 export const newsService = {
   async getNews(params?: NewsFilterParams): Promise<{ data: NewsArticle[]; total: number }> {
-    let list = [...memoryNews];
-
-    try {
-      const res = await fetch(CLOUD_NEWS_URL);
-      if (res.ok) {
-        const json = await res.json();
-        const cloudData = json.data;
-        if (Array.isArray(cloudData) && cloudData.length > 0) {
-          const merged = [...cloudData];
-          list.forEach((l: NewsArticle) => {
-            if (!merged.some(m => m.id === l.id || m.slug === l.slug)) {
-              merged.unshift(l);
-            }
-          });
-          if (JSON.stringify(merged) !== JSON.stringify(memoryNews)) {
-            memoryNews = merged;
-            saveToStorage(STORAGE_KEY, merged);
-            realtimeSync.publish('NEWS_CHANGED', merged);
-          }
-          list = memoryNews;
-        }
-      }
-    } catch {
-      // Use local memory fallback
-    }
-
-    let filtered = [...list];
+    let filtered = [...memoryNews];
 
     if (params?.categorySlug) {
       filtered = filtered.filter(n => n.categorySlug === params.categorySlug);
@@ -111,7 +78,6 @@ export const newsService = {
 
     const updatedList = [newArticle, ...memoryNews];
     persistNews(updatedList);
-    pushNewsToCloud(updatedList);
 
     return newArticle;
   },
@@ -129,7 +95,6 @@ export const newsService = {
     const updatedList = [...memoryNews];
     updatedList[index] = updated;
     persistNews(updatedList);
-    pushNewsToCloud(updatedList);
 
     return updated;
   },
@@ -137,7 +102,6 @@ export const newsService = {
   async deleteNews(id: string): Promise<boolean> {
     const updatedList = memoryNews.filter(n => n.id !== id);
     persistNews(updatedList);
-    pushNewsToCloud(updatedList);
     return true;
   }
 };

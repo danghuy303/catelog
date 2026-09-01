@@ -44,25 +44,6 @@ export const HomePage: React.FC = () => {
 
   useEffect(() => {
     loadData();
-
-    // 1. Subscribe to Realtime Data Synchronization Engine
-    const unSubProduct = realtimeSync.subscribe('PRODUCT_CHANGED', () => {
-      loadData();
-    });
-    const unSubNews = realtimeSync.subscribe('NEWS_CHANGED', () => {
-      loadData();
-    });
-
-    // 2. Auto-poll every 3 seconds for live multi-device sync
-    const timer = setInterval(() => {
-      loadData();
-    }, 3000);
-
-    return () => {
-      unSubProduct();
-      unSubNews();
-      clearInterval(timer);
-    };
   }, []);
 
   const filteredProducts = activeCategoryTab === 'all'

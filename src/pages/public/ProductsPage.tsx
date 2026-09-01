@@ -50,21 +50,6 @@ export const ProductsPage: React.FC = () => {
     }
 
     fetchProducts();
-
-    // 1. Subscribe to Realtime Data Synchronization Engine
-    const unsubscribe = realtimeSync.subscribe('PRODUCT_CHANGED', () => {
-      fetchProducts();
-    });
-
-    // 2. Auto-poll every 3 seconds for live multi-device sync
-    const timer = setInterval(() => {
-      fetchProducts();
-    }, 3000);
-
-    return () => {
-      unsubscribe();
-      clearInterval(timer);
-    };
   }, [categorySlug, searchTerm]);
 
   const pageTitle = currentCategory ? currentCategory.name : 'Tất cả sản phẩm';

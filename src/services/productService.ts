@@ -4,10 +4,19 @@ import { loadFromStorage, saveToStorage } from '../utils/storage';
 import { realtimeSync } from './realtimeService';
 
 const STORAGE_KEY = 'thienthanh_products_db';
-const CLOUD_PRODUCTS_URL = 'https://api.restful-api.dev/objects/ff808181a04ccf2d01a052f1252217da';
 
-// Reactive in-memory store for instant zero-delay access
+// Reactive in-memory store for instant 0ms access
 let memoryProducts: Product[] = loadFromStorage<Product[]>(STORAGE_KEY, MOCK_PRODUCTS);
+
+// Listen to realtimeSync for cross-window / cross-device incoming product updates
+realtimeSync.subscribe('PRODUCT_CHANGED', (newProducts: Product[]) => {
+  if (Array.isArray(newProducts) && newProducts.length > 0) {
+    if (JSON.stringify(newProducts) !== JSON.stringify(memoryProducts)) {
+      memoryProducts = newProducts;
+      saveToStorage(STORAGE_KEY, newProducts);
+    }
+  }
+});
 
 function persistProducts(products: Product[]): void {
   memoryProducts = products;
@@ -16,7 +25,7 @@ function persistProducts(products: Product[]): void {
 }
 
 async function pushProductsToCloud(products: Product[]): Promise<void> {
-  // 1. Vercel Serverless Function
+  // Sync to Vercel native API endpoint
   try {
     await fetch('/api/products', {
       method: 'POST',
@@ -26,38 +35,19 @@ async function pushProductsToCloud(products: Product[]): Promise<void> {
   } catch {
     // fallback
   }
-
-  // 2. Permanent REST Cloud Storage
-  try {
-    await fetch(CLOUD_PRODUCTS_URL, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: 'TT_PRODUCTS_PERMANENT',
-        data: products
-      })
-    });
-  } catch (e) {
-    console.warn('Cloud product sync notice:', e);
-  }
 }
 
 export const productService = {
   async getProducts(params?: ProductFilterParams): Promise<{ data: Product[]; total: number }> {
-    // Always start with memoryProducts for INSTANT 0ms response on Client A
-    let list = [...memoryProducts];
-
-    // Background cloud fetch to pull remote additions from other devices
+    // 1. Try Vercel Native API for cross-device cold start sync
     try {
-      const res = await fetch(CLOUD_PRODUCTS_URL);
-      if (res.ok) {
-        const json = await res.json();
-        const cloudData = json.data;
-        if (Array.isArray(cloudData) && cloudData.length > 0) {
-          // Cloud order is global authoritative order
-          const merged = [...cloudData];
-          // Keep any unpushed local items at the top
-          list.forEach((l: Product) => {
+      const vRes = await fetch('/api/products');
+      if (vRes.ok) {
+        const vJson = await vRes.json();
+        if (vJson.success && Array.isArray(vJson.data) && vJson.data.length > 0) {
+          const cloudList: Product[] = vJson.data;
+          const merged = [...cloudList];
+          memoryProducts.forEach((l: Product) => {
             if (!merged.some(m => m.id === l.id || m.sku === l.sku)) {
               merged.unshift(l);
             }
@@ -65,16 +55,14 @@ export const productService = {
           if (JSON.stringify(merged) !== JSON.stringify(memoryProducts)) {
             memoryProducts = merged;
             saveToStorage(STORAGE_KEY, merged);
-            realtimeSync.publish('PRODUCT_CHANGED', merged);
           }
-          list = memoryProducts;
         }
       }
     } catch {
       // Use local memory fallback
     }
 
-    let filtered = [...list];
+    let filtered = [...memoryProducts];
 
     if (params?.categorySlug) {
       filtered = filtered.filter(p => p.categorySlug === params.categorySlug);

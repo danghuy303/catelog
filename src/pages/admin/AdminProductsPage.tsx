@@ -47,25 +47,6 @@ export const AdminProductsPage: React.FC = () => {
 
   useEffect(() => {
     fetchProducts();
-
-    // 1. Subscribe to Realtime Data Synchronization Engine
-    const unsubscribe = realtimeSync.subscribe('PRODUCT_CHANGED', (newProducts: Product[]) => {
-      if (Array.isArray(newProducts) && !search && !selectedCategory && !selectedStatus) {
-        setProducts(newProducts);
-      } else {
-        fetchProducts();
-      }
-    });
-
-    // 2. Auto-poll every 3 seconds for live multi-device sync
-    const timer = setInterval(() => {
-      fetchProducts();
-    }, 3000);
-
-    return () => {
-      unsubscribe();
-      clearInterval(timer);
-    };
   }, [search, selectedCategory, selectedStatus]);
 
   const handleDelete = async () => {
