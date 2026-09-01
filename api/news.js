@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 
-const TMP_FILE = path.join('/tmp', 'thienthanh_products_store.json');
+const TMP_FILE = path.join('/tmp', 'thienthanh_news_store.json');
 let inMemoryStore = null;
 
 export default async function handler(req, res) {
