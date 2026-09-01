@@ -3,14 +3,13 @@ import { useParams, useSearchParams } from 'react-router-dom';
 import { ProductCard } from '../../components/product/ProductCard';
 import { Breadcrumb } from '../../components/common/Breadcrumb';
 import { SearchInput } from '../../components/common/SearchInput';
-import { Pagination } from '../../components/common/Pagination';
 import { productService } from '../../services/productService';
 import { categoryService } from '../../services/categoryService';
 import { realtimeSync } from '../../services/realtimeService';
 import { ProductCategory } from '../../types/category';
 import { Product } from '../../types/product';
 import { Helmet } from 'react-helmet-async';
-import { Filter, Layers } from 'lucide-react';
+import { Layers } from 'lucide-react';
 
 export const ProductsPage: React.FC = () => {
   const { categorySlug } = useParams<{ categorySlug?: string }>();
@@ -19,7 +18,6 @@ export const ProductsPage: React.FC = () => {
   const [products, setProducts] = useState<Product[]>([]);
   const [currentCategory, setCurrentCategory] = useState<ProductCategory | null>(null);
   const [searchTerm, setSearchTerm] = useState(searchParams.get('q') || '');
-  const [currentPage, setCurrentPage] = useState(1);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -30,26 +28,44 @@ export const ProductsPage: React.FC = () => {
     loadInitial();
   }, []);
 
-  useEffect(() => {
-    async function fetchProducts() {
-      setLoading(true);
-      if (categorySlug) {
-        const cat = await categoryService.getProductCategoryBySlug(categorySlug);
-        setCurrentCategory(cat);
-      } else {
-        setCurrentCategory(null);
-      }
-
-      const res = await productService.getProducts({
-        categorySlug,
-        search: searchTerm
-      });
-
-      setProducts(res.data);
-      setLoading(false);
+  const fetchProducts = async () => {
+    setLoading(true);
+    if (categorySlug) {
+      const cat = await categoryService.getProductCategoryBySlug(categorySlug);
+      setCurrentCategory(cat);
+    } else {
+      setCurrentCategory(null);
     }
 
+    const res = await productService.getProducts({
+      categorySlug,
+      search: searchTerm
+    });
+
+    setProducts(res.data);
+    setLoading(false);
+  };
+
+  useEffect(() => {
     fetchProducts();
+
+    // 1. Listen to instant product change events (0ms update when product created/edited)
+    const unsubscribe = realtimeSync.subscribe('PRODUCT_CHANGED', () => {
+      fetchProducts();
+    });
+
+    // 2. Refresh when switching tabs or focusing window
+    const handleFocus = () => {
+      fetchProducts();
+    };
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleFocus);
+
+    return () => {
+      unsubscribe();
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleFocus);
+    };
   }, [categorySlug, searchTerm]);
 
   const pageTitle = currentCategory ? currentCategory.name : 'Tất cả sản phẩm';

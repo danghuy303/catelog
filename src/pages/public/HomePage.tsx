@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { HeroSection } from '../../components/home/HeroSection';
 import { TrustSection } from '../../components/home/TrustSection';
 import { AboutSection } from '../../components/home/AboutSection';
@@ -25,7 +24,7 @@ export const HomePage: React.FC = () => {
   const [products, setProducts] = useState<Product[]>([]);
   const [newsList, setNewsList] = useState<NewsArticle[]>([]);
   const [activeCategoryTab, setActiveCategoryTab] = useState<string>('all');
-  const [loadingProducts, setLoadingProducts] = useState(true);
+  const [, setLoadingProducts] = useState(true);
 
   const loadData = async () => {
     try {
@@ -44,6 +43,28 @@ export const HomePage: React.FC = () => {
 
   useEffect(() => {
     loadData();
+
+    // 1. Instant event listener when products or news change (0ms update)
+    const unSubProd = realtimeSync.subscribe('PRODUCT_CHANGED', () => {
+      loadData();
+    });
+    const unSubNews = realtimeSync.subscribe('NEWS_CHANGED', () => {
+      loadData();
+    });
+
+    // 2. Refresh when switching tabs back to Home Page
+    const handleFocus = () => {
+      loadData();
+    };
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleFocus);
+
+    return () => {
+      unSubProd();
+      unSubNews();
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleFocus);
+    };
   }, []);
 
   const filteredProducts = activeCategoryTab === 'all'
@@ -60,40 +81,43 @@ export const HomePage: React.FC = () => {
       {/* 1. Hero Section */}
       <HeroSection />
 
-      {/* 2. Trust & Statistics Section */}
+      {/* 2. Trust Badges */}
       <TrustSection />
 
-      {/* 3. Product Categories Section */}
-      <section className="py-16 sm:py-24 bg-surfaceBg">
+      {/* 3. Featured Product Categories */}
+      <section className="py-16 bg-slate-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <SectionHeader
-            badge="DANH MỤC TIÊU BIỂU"
-            title="Danh mục sản phẩm Kiot Thiên Thanh"
-            subheading="Đa dạng sản phẩm đáp ứng đầy đủ nhu cầu tiêu dùng hàng ngày và gói quà tặng cao cấp cho doanh nghiệp."
+            title="Danh Mục Sản Phẩm Phân Phối"
+            subheading="Hơn 500+ dòng sản phẩm tiêu dùng chất lượng cao, đầy đủ chứng nhận CO/CQ dành cho doanh nghiệp & bếp ăn công nghiệp."
+            centered
           />
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
-            {categories.map((cat) => (
-              <CategoryCard key={cat.id} category={cat} />
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6 mt-12">
+            {categories.map((category) => (
+              <CategoryCard key={category.id} category={category} />
             ))}
           </div>
         </div>
       </section>
 
-      {/* 4. Featured Products Section with Tab Filter */}
-      <section className="py-16 sm:py-24 bg-white">
+      {/* 4. About Us Section */}
+      <AboutSection />
+
+      {/* 5. Featured Products Showcase */}
+      <section className="py-16 bg-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex flex-col md:flex-row md:items-end justify-between mb-10 gap-6">
+          <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-10">
             <div>
-              <span className="inline-block px-3 py-1 mb-2 text-xs font-bold tracking-wider text-brand-600 uppercase bg-brand-50 rounded-full border border-brand-200">
-                SẢN PHẨM NỔI BẬT
-              </span>
-              <h2 className="text-2xl sm:text-3xl font-extrabold text-gray-900 tracking-tight">
-                Sản phẩm được doanh nghiệp tin chọn
+              <h2 className="text-3xl font-extrabold text-gray-900 tracking-tight sm:text-4xl">
+                Sản Phẩm Tiêu Biểu
               </h2>
+              <p className="mt-2 text-sm text-gray-500 max-w-xl">
+                Danh sách các sản phẩm đang được các tập đoàn, đối tác B2B tin tưởng lựa chọn nhiều nhất tại Kiot Thiên Thanh.
+              </p>
             </div>
 
-            {/* Category Filter Tabs */}
+            {/* Category Tabs */}
             <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
               <button
                 onClick={() => setActiveCategoryTab('all')}
@@ -107,7 +131,7 @@ export const HomePage: React.FC = () => {
               </button>
               {categories.map((cat) => (
                 <button
-                  key={cat.slug}
+                  key={cat.id}
                   onClick={() => setActiveCategoryTab(cat.slug)}
                   className={`px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap transition-all ${
                     activeCategoryTab === cat.slug
@@ -121,61 +145,45 @@ export const HomePage: React.FC = () => {
             </div>
           </div>
 
-          {/* Product Grid */}
-          {loadingProducts ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-              {[1, 2, 3, 4].map((i) => (
-                <div key={i} className="h-80 bg-slate-100 rounded-3xl animate-pulse" />
-              ))}
-            </div>
-          ) : filteredProducts.length > 0 ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-              {filteredProducts.map((p) => (
-                <ProductCard key={p.id} product={p} />
-              ))}
-            </div>
-          ) : (
-            <div className="text-center py-12 bg-slate-50 rounded-3xl border border-gray-100">
-              <p className="text-sm text-gray-500 font-medium">Chưa có sản phẩm trong danh mục này.</p>
-            </div>
-          )}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            {filteredProducts.slice(0, 8).map((product) => (
+              <ProductCard key={product.id} product={product} />
+            ))}
+          </div>
 
-          <div className="mt-12 text-center">
-            <Link to="/san-pham">
-              <Button size="lg" variant="outline" rightIcon={<ArrowRight className="w-4 h-4" />}>
-                Xem toàn bộ sản phẩm ({products.length})
+          <div className="text-center mt-12">
+            <a href="/san-pham" className="inline-block">
+              <Button variant="outline" size="lg" rightIcon={<ArrowRight className="w-4 h-4" />}>
+                Xem tất cả 500+ sản phẩm
               </Button>
-            </Link>
+            </a>
           </div>
         </div>
       </section>
 
-      {/* 5. About Thiên Thanh Section */}
-      <AboutSection />
-
-      {/* 6. Why Choose Us Section */}
+      {/* 6. Why Choose Us */}
       <WhyChooseUsSection />
 
-      {/* 7. B2B Enterprise Solution Banner */}
+      {/* 7. B2B / Gift Solutions */}
       <B2BSection />
 
-      {/* 8. News & Activities Section */}
-      <section className="py-16 sm:py-24 bg-white">
+      {/* 8. Latest News & Blog */}
+      <section className="py-16 bg-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-end justify-between mb-12">
+          <div className="flex items-center justify-between mb-10">
             <div>
-              <span className="inline-block px-3 py-1 mb-2 text-xs font-bold tracking-wider text-brand-600 uppercase bg-brand-50 rounded-full border border-brand-200">
-                TIN TỨC SỰ KIỆN
-              </span>
-              <h2 className="text-2xl sm:text-3xl font-extrabold text-gray-900 tracking-tight">
-                Tin tức & Hoạt động doanh nghiệp
+              <h2 className="text-3xl font-extrabold text-gray-900 tracking-tight sm:text-4xl">
+                Tin Tức & Hoạt Động
               </h2>
+              <p className="mt-2 text-sm text-gray-500">
+                Cập nhật thông tin xu hướng quà tặng doanh nghiệp và văn hóa Kiot Thiên Thanh.
+              </p>
             </div>
-            <Link to="/tin-tuc" className="hidden sm:inline-flex">
-              <Button variant="ghost" size="sm" rightIcon={<ArrowRight className="w-4 h-4" />}>
+            <a href="/tin-tuc" className="hidden sm:inline-block">
+              <Button variant="ghost" rightIcon={<ArrowRight className="w-4 h-4" />}>
                 Xem tất cả bài viết
               </Button>
-            </Link>
+            </a>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
