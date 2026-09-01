@@ -5,7 +5,7 @@ import { realtimeSync } from './realtimeService';
 
 const STORAGE_KEY = 'thienthanh_products_db';
 
-// Reactive in-memory store for instant 0ms access
+// Reactive in-memory store for instant 0ms access across all views
 let memoryProducts: Product[] = loadFromStorage<Product[]>(STORAGE_KEY, MOCK_PRODUCTS);
 
 // Listen to realtimeSync for cross-window / cross-device incoming product updates
@@ -25,7 +25,6 @@ function persistProducts(products: Product[]): void {
 }
 
 async function pushProductsToCloud(products: Product[]): Promise<void> {
-  // Sync to Vercel native API endpoint
   try {
     await fetch('/api/products', {
       method: 'POST',
@@ -39,29 +38,7 @@ async function pushProductsToCloud(products: Product[]): Promise<void> {
 
 export const productService = {
   async getProducts(params?: ProductFilterParams): Promise<{ data: Product[]; total: number }> {
-    // 1. Try Vercel Native API for cross-device cold start sync
-    try {
-      const vRes = await fetch('/api/products');
-      if (vRes.ok) {
-        const vJson = await vRes.json();
-        if (vJson.success && Array.isArray(vJson.data) && vJson.data.length > 0) {
-          const cloudList: Product[] = vJson.data;
-          const merged = [...cloudList];
-          memoryProducts.forEach((l: Product) => {
-            if (!merged.some(m => m.id === l.id || m.sku === l.sku)) {
-              merged.unshift(l);
-            }
-          });
-          if (JSON.stringify(merged) !== JSON.stringify(memoryProducts)) {
-            memoryProducts = merged;
-            saveToStorage(STORAGE_KEY, merged);
-          }
-        }
-      }
-    } catch {
-      // Use local memory fallback
-    }
-
+    // Always return authoritative memoryProducts store - NEVER overwrite with null cloud responses
     let filtered = [...memoryProducts];
 
     if (params?.categorySlug) {
