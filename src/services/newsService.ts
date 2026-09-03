@@ -4,26 +4,56 @@ import { loadFromStorage, saveToStorage } from '../utils/storage';
 import { realtimeSync } from './realtimeService';
 
 const STORAGE_KEY = 'thienthanh_news_db';
+const DELETED_NEWS_KEY = 'thienthanh_deleted_news_db';
+
+function getDeletedNewsIds(): string[] {
+  return loadFromStorage<string[]>(DELETED_NEWS_KEY, []);
+}
+
+function addDeletedNewsId(id: string): void {
+  const ids = getDeletedNewsIds();
+  if (!ids.includes(id)) {
+    ids.push(id);
+    saveToStorage(DELETED_NEWS_KEY, ids);
+  }
+}
 
 function getLocalNews(): NewsArticle[] {
-  return loadFromStorage<NewsArticle[]>(STORAGE_KEY, MOCK_NEWS);
+  const deletedIds = getDeletedNewsIds();
+  const articles = loadFromStorage<NewsArticle[]>(STORAGE_KEY, MOCK_NEWS);
+  return articles
+    .filter(a => a && a.id && !deletedIds.includes(a.id))
+    .sort((a, b) => new Date(b.createdAt || b.publishedAt || 0).getTime() - new Date(a.createdAt || a.publishedAt || 0).getTime());
 }
 
 let memoryNews: NewsArticle[] = getLocalNews();
 
 realtimeSync.subscribe('NEWS_CHANGED', (incomingNews: NewsArticle[]) => {
-  if (Array.isArray(incomingNews) && incomingNews.length > 0) {
+  if (Array.isArray(incomingNews)) {
+    const deletedIds = getDeletedNewsIds();
     const currentLocal = getLocalNews();
-    const merged = [...currentLocal];
+    const mergedMap = new Map<string, NewsArticle>();
 
-    incomingNews.forEach(inc => {
-      const idx = merged.findIndex(m => m.id === inc.id);
-      if (idx !== -1) {
-        merged[idx] = { ...merged[idx], ...inc };
-      } else {
-        merged.unshift(inc);
+    currentLocal.forEach(a => {
+      if (a && a.id && !deletedIds.includes(a.id)) {
+        mergedMap.set(a.id, a);
       }
     });
+
+    incomingNews.forEach(inc => {
+      if (inc && inc.id && !deletedIds.includes(inc.id)) {
+        const existing = mergedMap.get(inc.id);
+        if (existing) {
+          mergedMap.set(inc.id, { ...existing, ...inc });
+        } else {
+          mergedMap.set(inc.id, inc);
+        }
+      }
+    });
+
+    const merged = Array.from(mergedMap.values()).sort(
+      (a, b) => new Date(b.createdAt || b.publishedAt || 0).getTime() - new Date(a.createdAt || a.publishedAt || 0).getTime()
+    );
 
     memoryNews = merged;
     saveToStorage(STORAGE_KEY, merged);
@@ -31,9 +61,13 @@ realtimeSync.subscribe('NEWS_CHANGED', (incomingNews: NewsArticle[]) => {
 });
 
 function persistNews(news: NewsArticle[]): void {
-  memoryNews = news;
-  saveToStorage(STORAGE_KEY, news);
-  realtimeSync.publish('NEWS_CHANGED', news);
+  const deletedIds = getDeletedNewsIds();
+  const sorted = [...news]
+    .filter(a => a && a.id && !deletedIds.includes(a.id))
+    .sort((a, b) => new Date(b.createdAt || b.publishedAt || 0).getTime() - new Date(a.createdAt || a.publishedAt || 0).getTime());
+  memoryNews = sorted;
+  saveToStorage(STORAGE_KEY, sorted);
+  realtimeSync.publish('NEWS_CHANGED', sorted);
 }
 
 async function pushNewsToCloud(news: NewsArticle[]): Promise<void> {
@@ -50,22 +84,30 @@ async function pushNewsToCloud(news: NewsArticle[]): Promise<void> {
 
 async function syncWithCloudStore(): Promise<NewsArticle[]> {
   try {
+    const deletedIds = getDeletedNewsIds();
     const res = await fetch('/api/news');
     if (res.ok) {
       const json = await res.json();
       if (json.success && Array.isArray(json.data) && json.data.length > 0) {
         const cloudNews: NewsArticle[] = json.data;
         const currentLocal = getLocalNews();
-        const merged = [...currentLocal];
+        const mergedMap = new Map<string, NewsArticle>();
 
-        cloudNews.forEach(c => {
-          const idx = merged.findIndex(m => m.id === c.id);
-          if (idx !== -1) {
-            merged[idx] = { ...merged[idx], ...c };
-          } else {
-            merged.unshift(c);
+        currentLocal.forEach(a => {
+          if (a && a.id && !deletedIds.includes(a.id)) {
+            mergedMap.set(a.id, a);
           }
         });
+
+        cloudNews.forEach(c => {
+          if (c && c.id && !deletedIds.includes(c.id) && !mergedMap.has(c.id)) {
+            mergedMap.set(c.id, c);
+          }
+        });
+
+        const merged = Array.from(mergedMap.values()).sort(
+          (a, b) => new Date(b.createdAt || b.publishedAt || 0).getTime() - new Date(a.createdAt || a.publishedAt || 0).getTime()
+        );
 
         memoryNews = merged;
         saveToStorage(STORAGE_KEY, merged);
@@ -91,7 +133,9 @@ export const newsService = {
       // Use local memory fallback
     }
 
-    let filtered = [...memoryNews];
+    let filtered = [...memoryNews].sort(
+      (a, b) => new Date(b.createdAt || b.publishedAt || 0).getTime() - new Date(a.createdAt || a.publishedAt || 0).getTime()
+    );
 
     if (params?.categorySlug) {
       filtered = filtered.filter(n => n.categorySlug === params.categorySlug);
@@ -176,6 +220,7 @@ export const newsService = {
   },
 
   async deleteNews(id: string): Promise<boolean> {
+    addDeletedNewsId(id);
     const currentList = getLocalNews();
     const updatedList = currentList.filter(n => n.id !== id);
     persistNews(updatedList);

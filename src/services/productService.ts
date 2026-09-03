@@ -4,26 +4,47 @@ import { loadFromStorage, saveToStorage } from '../utils/storage';
 import { realtimeSync } from './realtimeService';
 
 const STORAGE_KEY = 'thienthanh_products_db';
+const DELETED_PRODUCTS_KEY = 'thienthanh_deleted_products_db';
+
+function getDeletedProductIds(): string[] {
+  return loadFromStorage<string[]>(DELETED_PRODUCTS_KEY, []);
+}
+
+function addDeletedProductId(id: string): void {
+  const ids = getDeletedProductIds();
+  if (!ids.includes(id)) {
+    ids.push(id);
+    saveToStorage(DELETED_PRODUCTS_KEY, ids);
+  }
+}
 
 function getLocalProducts(): Product[] {
+  const deletedIds = getDeletedProductIds();
   const prods = loadFromStorage<Product[]>(STORAGE_KEY, MOCK_PRODUCTS);
-  return prods.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  return prods
+    .filter(p => p && p.id && !deletedIds.includes(p.id))
+    .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
 }
 
 let memoryProducts: Product[] = getLocalProducts();
 
 // Listen to realtimeSync for cross-window / cross-device incoming updates
 realtimeSync.subscribe('PRODUCT_CHANGED', (incomingProducts: Product[]) => {
-  if (Array.isArray(incomingProducts) && incomingProducts.length > 0) {
+  if (Array.isArray(incomingProducts)) {
+    const deletedIds = getDeletedProductIds();
     const currentLocal = getLocalProducts();
     const mergedMap = new Map<string, Product>();
 
-    // Put current local products first
-    currentLocal.forEach(p => mergedMap.set(p.id, p));
+    // Put current local products first (excluding deleted ones)
+    currentLocal.forEach(p => {
+      if (p && p.id && !deletedIds.includes(p.id)) {
+        mergedMap.set(p.id, p);
+      }
+    });
 
-    // Merge incoming products without overriding with empty data
+    // Merge incoming products without overriding with empty data or deleted products
     incomingProducts.forEach(inc => {
-      if (inc && inc.id) {
+      if (inc && inc.id && !deletedIds.includes(inc.id)) {
         const existing = mergedMap.get(inc.id);
         if (existing) {
           mergedMap.set(inc.id, { ...existing, ...inc });
@@ -43,9 +64,12 @@ realtimeSync.subscribe('PRODUCT_CHANGED', (incomingProducts: Product[]) => {
 });
 
 function persistProducts(products: Product[]): void {
-  const sorted = [...products].sort(
-    (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
-  );
+  const deletedIds = getDeletedProductIds();
+  const sorted = [...products]
+    .filter(p => p && p.id && !deletedIds.includes(p.id))
+    .sort(
+      (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+    );
   memoryProducts = sorted;
   saveToStorage(STORAGE_KEY, sorted);
   realtimeSync.publish('PRODUCT_CHANGED', sorted);
@@ -65,6 +89,7 @@ async function pushProductsToCloud(products: Product[]): Promise<void> {
 
 async function syncWithCloudStore(): Promise<Product[]> {
   try {
+    const deletedIds = getDeletedProductIds();
     const res = await fetch('/api/products');
     if (res.ok) {
       const json = await res.json();
@@ -73,11 +98,15 @@ async function syncWithCloudStore(): Promise<Product[]> {
         const currentLocal = getLocalProducts();
         const mergedMap = new Map<string, Product>();
 
-        // Always prioritize local products so newly created local items are NEVER lost
-        currentLocal.forEach(p => mergedMap.set(p.id, p));
+        // Always prioritize local products and respect deleted IDs
+        currentLocal.forEach(p => {
+          if (p && p.id && !deletedIds.includes(p.id)) {
+            mergedMap.set(p.id, p);
+          }
+        });
 
         cloudProducts.forEach(c => {
-          if (c && c.id && !mergedMap.has(c.id)) {
+          if (c && c.id && !deletedIds.includes(c.id) && !mergedMap.has(c.id)) {
             mergedMap.set(c.id, c);
           }
         });
@@ -231,6 +260,7 @@ export const productService = {
   },
 
   async deleteProduct(id: string): Promise<boolean> {
+    addDeletedProductId(id);
     const currentList = getLocalProducts();
     const updatedList = currentList.filter(p => p.id !== id);
     persistProducts(updatedList);

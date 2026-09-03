@@ -11,6 +11,8 @@ import { toast } from 'sonner';
 import { Plus, Edit, Trash2, Eye } from 'lucide-react';
 import { Helmet } from 'react-helmet-async';
 
+import { realtimeSync } from '../../services/realtimeService';
+
 export const AdminNewsPage: React.FC = () => {
   const navigate = useNavigate();
   const [newsList, setNewsList] = useState<NewsArticle[]>([]);
@@ -25,6 +27,10 @@ export const AdminNewsPage: React.FC = () => {
 
   useEffect(() => {
     fetchNews();
+    const unsub = realtimeSync.subscribe('NEWS_CHANGED', () => {
+      fetchNews();
+    });
+    return () => unsub();
   }, [search]);
 
   const handleDelete = async () => {
