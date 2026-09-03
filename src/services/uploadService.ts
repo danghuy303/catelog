@@ -32,17 +32,62 @@ export const uploadService = {
       return res.data;
     }
 
-    // 3. Fallback client-side preview URL creation
+    // 3. Fallback client-side image compression and preview creation
     return new Promise((resolve) => {
       const reader = new FileReader();
-      reader.onloadend = () => {
-        const objectKey = `products/${productId || 'temp'}/${Date.now()}_${file.name.replace(/\s+/g, '_')}`;
-        resolve({
-          success: true,
-          url: reader.result as string,
-          objectKey,
-          fileName: file.name
-        });
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const maxDim = 800;
+          let width = img.width;
+          let height = img.height;
+
+          if (width > maxDim || height > maxDim) {
+            if (width > height) {
+              height = Math.round((height * maxDim) / width);
+              width = maxDim;
+            } else {
+              width = Math.round((width * maxDim) / height);
+              maxDim;
+              height = maxDim;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, width, height);
+            const compressedUrl = canvas.toDataURL('image/jpeg', 0.7);
+            const objectKey = `products/${productId || 'temp'}/${Date.now()}_${file.name.replace(/\s+/g, '_')}`;
+            resolve({
+              success: true,
+              url: compressedUrl,
+              objectKey,
+              fileName: file.name
+            });
+            return;
+          }
+
+          const objectKey = `products/${productId || 'temp'}/${Date.now()}_${file.name.replace(/\s+/g, '_')}`;
+          resolve({
+            success: true,
+            url: e.target?.result as string,
+            objectKey,
+            fileName: file.name
+          });
+        };
+        img.onerror = () => {
+          const objectKey = `products/${productId || 'temp'}/${Date.now()}_${file.name.replace(/\s+/g, '_')}`;
+          resolve({
+            success: true,
+            url: e.target?.result as string,
+            objectKey,
+            fileName: file.name
+          });
+        };
+        img.src = e.target?.result as string;
       };
       reader.readAsDataURL(file);
     });

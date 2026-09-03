@@ -47,6 +47,10 @@ export const AdminProductsPage: React.FC = () => {
 
   useEffect(() => {
     fetchProducts();
+    const unsub = realtimeSync.subscribe('PRODUCT_CHANGED', () => {
+      fetchProducts();
+    });
+    return () => unsub();
   }, [search, selectedCategory, selectedStatus]);
 
   const handleDelete = async () => {

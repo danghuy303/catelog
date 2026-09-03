@@ -6,26 +6,49 @@ import { realtimeSync } from './realtimeService';
 const STORAGE_KEY = 'thienthanh_products_db';
 
 function getLocalProducts(): Product[] {
-  return loadFromStorage<Product[]>(STORAGE_KEY, MOCK_PRODUCTS);
+  const prods = loadFromStorage<Product[]>(STORAGE_KEY, MOCK_PRODUCTS);
+  return prods.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
 }
 
-// Reactive in-memory store for instant 0ms access across all views
 let memoryProducts: Product[] = getLocalProducts();
 
-// Listen to realtimeSync for cross-window / cross-device incoming product updates
-realtimeSync.subscribe('PRODUCT_CHANGED', (newProducts: Product[]) => {
-  if (Array.isArray(newProducts) && newProducts.length > 0) {
-    if (JSON.stringify(newProducts) !== JSON.stringify(memoryProducts)) {
-      memoryProducts = newProducts;
-      saveToStorage(STORAGE_KEY, newProducts);
-    }
+// Listen to realtimeSync for cross-window / cross-device incoming updates
+realtimeSync.subscribe('PRODUCT_CHANGED', (incomingProducts: Product[]) => {
+  if (Array.isArray(incomingProducts) && incomingProducts.length > 0) {
+    const currentLocal = getLocalProducts();
+    const mergedMap = new Map<string, Product>();
+
+    // Put current local products first
+    currentLocal.forEach(p => mergedMap.set(p.id, p));
+
+    // Merge incoming products without overriding with empty data
+    incomingProducts.forEach(inc => {
+      if (inc && inc.id) {
+        const existing = mergedMap.get(inc.id);
+        if (existing) {
+          mergedMap.set(inc.id, { ...existing, ...inc });
+        } else {
+          mergedMap.set(inc.id, inc);
+        }
+      }
+    });
+
+    const merged = Array.from(mergedMap.values()).sort(
+      (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+    );
+
+    memoryProducts = merged;
+    saveToStorage(STORAGE_KEY, merged);
   }
 });
 
 function persistProducts(products: Product[]): void {
-  memoryProducts = products;
-  saveToStorage(STORAGE_KEY, products);
-  realtimeSync.publish('PRODUCT_CHANGED', products);
+  const sorted = [...products].sort(
+    (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+  );
+  memoryProducts = sorted;
+  saveToStorage(STORAGE_KEY, sorted);
+  realtimeSync.publish('PRODUCT_CHANGED', sorted);
 }
 
 async function pushProductsToCloud(products: Product[]): Promise<void> {
@@ -36,15 +59,62 @@ async function pushProductsToCloud(products: Product[]): Promise<void> {
       body: JSON.stringify(products)
     });
   } catch {
-    // fallback
+    // fallback gracefully
   }
+}
+
+async function syncWithCloudStore(): Promise<Product[]> {
+  try {
+    const res = await fetch('/api/products');
+    if (res.ok) {
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data) && json.data.length > 0) {
+        const cloudProducts: Product[] = json.data;
+        const currentLocal = getLocalProducts();
+        const mergedMap = new Map<string, Product>();
+
+        // Always prioritize local products so newly created local items are NEVER lost
+        currentLocal.forEach(p => mergedMap.set(p.id, p));
+
+        cloudProducts.forEach(c => {
+          if (c && c.id && !mergedMap.has(c.id)) {
+            mergedMap.set(c.id, c);
+          }
+        });
+
+        const merged = Array.from(mergedMap.values()).sort(
+          (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+        );
+
+        memoryProducts = merged;
+        saveToStorage(STORAGE_KEY, merged);
+        return merged;
+      }
+    }
+  } catch {
+    // Return local if fetch fails
+  }
+  return memoryProducts;
 }
 
 export const productService = {
   async getProducts(params?: ProductFilterParams): Promise<{ data: Product[]; total: number }> {
-    // ALWAYS reload latest products from LocalStorage to pick up any new additions instantly!
+    // 1. Load local memory first for instant 0ms response
     memoryProducts = getLocalProducts();
-    let filtered = [...memoryProducts];
+
+    // 2. Safely attempt cloud sync in background without blocking or wiping local products
+    try {
+      const synced = await syncWithCloudStore();
+      if (synced && synced.length > 0) {
+        memoryProducts = synced;
+      }
+    } catch {
+      // Use local memory fallback
+    }
+
+    let filtered = [...memoryProducts].sort(
+      (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+    );
 
     if (params?.categorySlug) {
       filtered = filtered.filter(p => p.categorySlug === params.categorySlug);
@@ -72,12 +142,14 @@ export const productService = {
   },
 
   async getProductBySlug(categorySlug: string, productSlug: string): Promise<Product | null> {
+    await syncWithCloudStore();
     const list = getLocalProducts();
     const found = list.find(p => p.slug === productSlug || p.id === productSlug);
     return found || null;
   },
 
   async getProductById(id: string): Promise<Product | null> {
+    await syncWithCloudStore();
     const list = getLocalProducts();
     const found = list.find(p => p.id === id);
     return found || null;
@@ -94,14 +166,18 @@ export const productService = {
     const currentList = getLocalProducts();
     const defaultThumb = productData.images?.[0]?.imageUrl || 'https://images.unsplash.com/photo-1584269600464-37b1b58a9fe7?auto=format&fit=crop&w=800&q=80';
     
+    // Unique ID and SKU for unlimited product creation
+    const uniqueId = `prod-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    const uniqueSku = productData.sku || `TT-SKU-${Date.now().toString().slice(-4)}`;
+
     const newProduct: Product = {
-      id: `prod-${Date.now()}`,
+      id: uniqueId,
       categoryId: productData.categoryId || 'cat-1',
       categoryName: productData.categoryName || 'Đồ uống',
       categorySlug: productData.categorySlug || 'do-uong',
       name: productData.name || 'Sản phẩm mới',
       slug: productData.slug || `san-pham-${Date.now()}`,
-      sku: productData.sku || `TT-SKU-${Math.floor(Math.random() * 1000)}`,
+      sku: uniqueSku,
       shortDescription: productData.shortDescription || '',
       description: productData.description || '',
       brand: productData.brand || 'Thiên Thanh',
@@ -110,7 +186,7 @@ export const productService = {
       thumbnailUrl: productData.thumbnailUrl || defaultThumb,
       images: productData.images && productData.images.length > 0 ? productData.images : [{
         id: `img-${Date.now()}`,
-        productId: `prod-${Date.now()}`,
+        productId: uniqueId,
         imageUrl: defaultThumb,
         fileName: 'placeholder.jpg',
         alt: productData.name || 'Ảnh sản phẩm',
@@ -125,9 +201,12 @@ export const productService = {
       updatedAt: new Date().toISOString()
     };
 
-    const updatedList = [newProduct, ...currentList];
+    // Remove collision and unshift to top of current list
+    const filteredList = currentList.filter(p => p.id !== uniqueId && p.sku !== uniqueSku);
+    const updatedList = [newProduct, ...filteredList];
+    
     persistProducts(updatedList);
-    pushProductsToCloud(updatedList);
+    await pushProductsToCloud(updatedList);
 
     return newProduct;
   },
@@ -146,7 +225,7 @@ export const productService = {
     const updatedList = [...currentList];
     updatedList[index] = updated;
     persistProducts(updatedList);
-    pushProductsToCloud(updatedList);
+    await pushProductsToCloud(updatedList);
 
     return updated;
   },
@@ -155,7 +234,7 @@ export const productService = {
     const currentList = getLocalProducts();
     const updatedList = currentList.filter(p => p.id !== id);
     persistProducts(updatedList);
-    pushProductsToCloud(updatedList);
+    await pushProductsToCloud(updatedList);
     return true;
   }
 };
